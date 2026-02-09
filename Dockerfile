@@ -1,0 +1,44 @@
+# ============================================
+# n8n-custom-mcp — Multi-stage Docker Build
+# ============================================
+# Stage 1: Build TypeScript → JavaScript
+# Stage 2: Production runtime with supergateway
+# ============================================
+
+# --- Build Stage ---
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependency files first (Docker layer caching)
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Copy source code and build
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# --- Production Stage ---
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy built files and production dependencies
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+
+# Install supergateway globally
+# supergateway wraps stdio MCP server into HTTP endpoint
+RUN npm install -g supergateway && npm cache clean --force
+
+# Default port
+ENV PORT=3000
+EXPOSE 3000
+
+# Entrypoint: supergateway wraps our MCP server
+ENTRYPOINT ["supergateway"]
+
+# Default command — can be overridden in docker-compose.yml
+CMD ["--stdio", "node dist/index.js", "--port", "3000", "--outputTransport", "streamableHttp", "--streamableHttpPath", "/mcp", "--cors"]

@@ -1,0 +1,23 @@
+# ============================================
+# n8n-custom-mcp — Standalone Docker Compose
+# ============================================
+# Chạy MCP server độc lập, kết nối đến n8n instance có sẵn.
+# Nếu bạn muốn chạy cùng n8n stack, xem README.md.
+# ============================================
+
+services:
+  n8n-mcp:
+    build: .
+    restart: always
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - N8N_HOST=${N8N_HOST:-http://localhost:5678}
+      - N8N_API_KEY=${N8N_API_KEY}
+    # Override CMD nếu cần tuỳ chỉnh
+    command: >
+      --stdio "node dist/index.js"
+      --port 3000
+      --outputTransport streamableHttp
+      --streamableHttpPath /mcp
+      --cors

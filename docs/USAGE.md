@@ -1,0 +1,134 @@
+# 📖 Hướng dẫn sử dụng nâng cao
+
+## Mục lục
+
+- [Kết hợp n8n-skills vào System Prompt](#kết-hợp-n8n-skills-vào-system-prompt)
+- [Các kịch bản sử dụng phổ biến](#các-kịch-bản-sử-dụng-phổ-biến)
+- [Tips & Tricks](#tips--tricks)
+
+---
+
+## Kết hợp n8n-skills vào System Prompt
+
+[czlonkowski/n8n-skills](https://github.com/czlonkowski/n8n-skills) cung cấp 7 bộ kiến thức giúp AI agent tạo workflow chính xác hơn.
+
+### Cách tích hợp
+
+1. Clone repo:
+   ```bash
+   git clone https://github.com/czlonkowski/n8n-skills.git
+   ```
+
+2. Đọc 3 file SKILL.md quan trọng nhất:
+   ```
+   skills/n8n-mcp-tools-expert/SKILL.md     ← Cách dùng MCP tools
+   skills/n8n-workflow-patterns/SKILL.md     ← 5 mẫu workflow chuẩn
+   skills/n8n-expression-syntax/SKILL.md     ← Cú pháp {{ }} trong n8n
+   ```
+
+3. Copy nội dung vào **System Prompt** của Agent trên LobeHub/OpenClaw.
+
+### System Prompt mẫu
+
+```markdown
+# Vai trò
+Bạn là chuyên gia n8n workflow automation với quyền truy cập MCP Server.
+
+# Kiến thức quan trọng
+
+## Webhook Data
+- Dữ liệu LUÔN nằm dưới $json.body
+- ✅ {{ $json.body.email }}
+- ❌ {{ $json.email }}
+
+## Code Node Return Format
+- Bắt buộc: [{json: {key: "value"}}]
+
+## Quy trình làm việc chuẩn
+1. create_workflow → Tạo
+2. activate_workflow → Bật
+3. trigger_webhook (test_mode: true) → Test
+4. list_executions → Kiểm tra
+5. get_execution → Debug nếu lỗi
+6. update_workflow → Sửa
+7. Lặp lại 3-6 cho đến khi OK
+```
+
+---
+
+## Các kịch bản sử dụng phổ biến
+
+### Kịch bản 1: Tạo webhook workflow hoàn chỉnh
+
+```
+Prompt: "Tạo webhook nhận POST từ Outlook, lấy subject và sender,
+         gửi thông báo vào Slack channel #notifications"
+```
+
+AI sẽ tự động:
+1. `create_workflow` — Tạo workflow với 3 nodes: Webhook → Set → Slack
+2. `activate_workflow` — Bật workflow
+3. `trigger_webhook` — Test với dữ liệu giả lập
+4. `list_executions` + `get_execution` — Kiểm tra kết quả
+
+### Kịch bản 2: Debug workflow đang lỗi
+
+```
+Prompt: "Workflow ID 42 đang bị lỗi, giúp tôi tìm nguyên nhân"
+```
+
+AI sẽ:
+1. `get_workflow` (id: "42") — Đọc cấu trúc workflow
+2. `list_executions` (workflowId: "42", status: "error") — Tìm lần chạy lỗi
+3. `get_execution` — Đọc error message chi tiết
+4. `update_workflow` — Sửa lỗi
+5. `execute_workflow` — Chạy lại để kiểm tra
+
+### Kịch bản 3: Quản lý hàng loạt
+
+```
+Prompt: "Liệt kê tất cả workflow đang active, tắt những cái có tên chứa 'test'"
+```
+
+AI sẽ:
+1. `list_workflows` (active: true) — Liệt kê
+2. Lọc kết quả tìm workflow có tên chứa "test"
+3. `activate_workflow` (active: false) — Tắt từng cái
+
+---
+
+## Tips & Tricks
+
+### 1. Luôn dùng test_mode khi test webhook
+
+```json
+{
+  "webhook_path": "your-path",
+  "test_mode": true,      // ← Quan trọng!
+  "body": { "key": "value" }
+}
+```
+
+`test_mode: true` gửi request vào `/webhook-test/` — n8n sẽ hiển thị data trên Editor UI, rất tiện để debug trực quan.
+
+### 2. Debug execution hiệu quả
+
+Khi `get_execution` trả về lỗi, hãy chú ý:
+- `error.message` — Thông báo lỗi chính
+- `error.node` — Node nào bị lỗi
+- `data.resultData.runData` — Dữ liệu chạy qua từng node
+
+### 3. Kiểm tra node compatibility
+
+Trước khi tạo workflow dùng node lạ, hãy chạy:
+```
+list_node_types → Kiểm tra xem node đó có cài trên n8n không
+```
+
+### 4. Backup trước khi xoá/sửa
+
+```
+get_workflow → Lưu JSON hiện tại → update_workflow hoặc delete_workflow
+```
+
+AI agent nên được dặn trong System Prompt: "Luôn đọc workflow hiện tại trước khi sửa hoặc xoá."
