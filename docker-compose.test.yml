@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  n8n-test:
+    image: n8nio/n8n:latest
+    container_name: n8n-test
+    restart: unless-stopped
+    ports:
+      - "5679:5678"  # Different port to avoid conflict
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_API_KEY=test-api-key-12345
+      - N8N_ENCRYPTION_KEY=test-encryption-key
+      - N8N_USER_MANAGEMENT_DISABLED=true
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres-test
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=n8n
+    volumes:
+      - n8n-test-data:/home/node/.n8n
+    depends_on:
+      - postgres-test
+
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: postgres-test
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=n8n
+      - POSTGRES_DB=n8n
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+
+volumes:
+  n8n-test-data:
+  postgres-test-data:

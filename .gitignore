@@ -27,6 +27,10 @@ npm-debug.log*
 # Docker
 docker-compose.override.yml
 
+# Testing
+coverage/
+.vitest-cache/
+
 # Package lock (optional - uncomment if you want to ignore)
 # package-lock.json
 .claude
