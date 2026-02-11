@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔌 n8n-custom-mcp
+# 🔌 n8n-custom-mcp v2.0.0-alpha
 
 **Full-power MCP Server cho n8n — Dành cho AI Agent thực sự muốn _làm chủ_ workflow.**
 
