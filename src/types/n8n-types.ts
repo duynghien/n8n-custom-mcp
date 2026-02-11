@@ -9,6 +9,9 @@ export interface N8nWorkflow {
   tags?: string[];
   createdAt?: string;
   updatedAt?: string;
+  staticData?: any;
+  pinData?: any;
+  versionId?: string;
 }
 
 export interface N8nNode {
@@ -72,12 +75,11 @@ export interface N8nConnections {
   };
 }
 
-// Template types
-export interface N8nTemplate {
-  id: string;
-  name: string;
-  description?: string;
-  category?: string;
-  nodes: string[];
-  workflow: N8nWorkflow;
-}
+// Re-export template types
+export type {
+  N8nTemplate,
+  TemplateSearchResult,
+  TemplateCacheEntry,
+  ImportTemplateOptions,
+  ExportWorkflowOptions,
+} from './template-types.js';

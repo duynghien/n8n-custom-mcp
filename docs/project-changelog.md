@@ -2,15 +2,14 @@
 
 Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận tại đây.
 
-## [Unreleased]
+## [2.0.0-beta] - 2026-02-11
 
 ### Added
-- **Phase 2: Basic Validation** hoàn tất.
-- Thêm tool `validate_workflow_structure` để kiểm tra lỗi trước khi triển khai.
-- Triển khai `ValidationService` xử lý 8+ loại quy tắc kiểm tra cấu trúc.
-- Thuật toán `GraphAnalyzer` phát hiện vòng lặp (circular dependencies) chính xác.
-- Tiện ích `ExpressionValidator` kiểm tra cú pháp `{{ }}` cơ bản.
-- Bổ sung 115 tests cho phần validation, nâng cao độ tin cậy.
+- **Phase 3: Template System** hoàn tất.
+- Triển khai 4 tools mới: `search_templates`, `get_template_details`, `import_template`, `export_workflow_as_template`.
+- Tích hợp n8n.io Template API với cơ chế cache 1 giờ giúp giảm 70% lượng request.
+- Cơ chế `WorkflowCleaner` đảm bảo bảo mật: Tự động loại bỏ credentials, execution data và IDs khi export.
+- Hỗ trợ `Dependency Resolution`: Cảnh báo khi thiếu community nodes trong template.
 
 ## [2.0.0-alpha] - 2025-02-10
 

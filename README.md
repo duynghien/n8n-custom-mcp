@@ -22,7 +22,7 @@
 
 Các MCP Server hiện tại cho n8n (ví dụ [`czlonkowski/n8n-mcp`](https://github.com/czlonkowski/n8n-mcp)) chỉ hỗ trợ **đọc và chạy** workflow. Bạn không thể tạo mới, chỉnh sửa, xoá, hay test webhook từ AI agent.
 
-**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **19 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
+**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **23 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
 
 | Khả năng | MCP Server khác | n8n-custom-mcp |
 |:---------|:---:|:---:|
@@ -135,7 +135,7 @@ Trong phần cấu hình MCP Plugin:
 | Type | MCP (Streamable HTTP) |
 | URL | `http://<IP-máy-chủ>:3000/mcp` |
 
-Sau khi kết nối, bạn sẽ thấy **19 tools** xuất hiện. ✅
+Sau khi kết nối, bạn sẽ thấy **23 tools** xuất hiện. ✅
 
 ## ⚙️ Cấu hình
 
@@ -162,9 +162,9 @@ supergateway \
 
 ## 💡 Sử dụng
 
-### Danh sách 17 Tools
+### Danh sách 23 Tools
 
-#### Workflow Management (11 tools)
+#### Workflow Management (12 tools)
 
 | Tool | Mô tả |
 |:-----|:------|
@@ -179,8 +179,9 @@ supergateway \
 | `list_executions` | Xem lịch sử chạy, lọc theo status/workflow |
 | `get_execution` | Xem chi tiết execution (data, errors) |
 | `list_node_types` | Liệt kê các node types đang cài |
+| `validate_workflow_structure` | Kiểm tra lỗi cấu trúc workflow trước khi deploy |
 
-#### Credentials Management (6 tools - NEW in v2.0)
+#### Credentials Management (6 tools)
 
 | Tool | Mô tả |
 |:-----|:------|
@@ -190,6 +191,15 @@ supergateway \
 | `update_credential` | Cập nhật credential existing |
 | `delete_credential` | Xoá credential (có safety check) |
 | `test_credential` | Test credential validity tự động |
+
+#### Template System (4 tools - NEW in v2.0-beta)
+
+| Tool | Mô tả |
+|:-----|:------|
+| `search_templates` | Tìm kiếm workflow mẫu từ thư viện n8n.io |
+| `get_template_details` | Lấy chi tiết JSON của một template |
+| `import_template` | Import template vào n8n với dependency resolution |
+| `export_workflow_as_template` | Export workflow thành template an toàn (đã xóa credentials) |
 
 ### Ví dụ: AI tự tạo workflow với credentials
 
@@ -260,11 +270,11 @@ LobeHub / OpenClaw
 Mọi đóng góp đều được chào đón! Xem [CONTRIBUTING.md](CONTRIBUTING.md) để biết chi tiết.
 
 Một vài ý tưởng:
-- [ ] Thêm `search_templates` — tìm workflow mẫu từ n8n.io
-- [ ] Thêm `get_credentials` — quản lý credentials qua MCP
+- [x] Thêm `search_templates` — tìm workflow mẫu từ n8n.io
+- [x] Thêm `get_credentials` — quản lý credentials qua MCP
+- [x] Thêm tool `import_workflow` / `export_workflow`
 - [ ] Hỗ trợ SSE transport
 - [ ] Viết test cases
-- [ ] Thêm tool `import_workflow` / `export_workflow`
 
 ## 📝 License
 

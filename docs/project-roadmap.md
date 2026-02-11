@@ -4,9 +4,9 @@
 Lộ trình phát triển n8n-custom-mcp từ một công cụ quản lý workflow cơ bản thành một nền tảng tự trị hoàn chỉnh cho AI Agent.
 
 ## Status Summary
-- **Current Version:** v2.0.0-alpha
-- **Overall Progress:** 45%
-- **Active Phase:** Phase 3 - Template System
+- **Current Version:** v2.0.0-beta
+- **Overall Progress:** 60%
+- **Active Phase:** Phase 4 - Backup System
 
 ## Development Phases
 
@@ -29,18 +29,18 @@ Lộ trình phát triển n8n-custom-mcp từ một công cụ quản lý workfl
 - [x] 115+ tests đảm bảo chất lượng.
 - **Status:** Completed ✅
 
-### 🏗️ Phase 3: Template System (In Progress)
-- [ ] Tìm kiếm template từ thư viện n8n.io.
-- [ ] Import template với tính năng dependency resolution.
-- [ ] Export workflow thành template an toàn (không chứa nhạy cảm).
-- **Status:** In Progress
-- **Target:** 2026-02-18
+### ✅ Phase 3: Template System
+- [x] Tìm kiếm template từ thư viện n8n.io.
+- [x] Import template với tính năng dependency resolution.
+- [x] Export workflow thành template an toàn (không chứa nhạy cảm).
+- **Status:** Completed ✅
 
-### 📅 Phase 4: Backup & Versioning
+### 🏗️ Phase 4: Backup & Versioning (In Progress)
 - [ ] Tự động backup workflow định kỳ.
 - [ ] Quản lý phiên bản cục bộ.
 - [ ] Restore từ các bản backup.
-- **Status:** Pending
+- **Status:** In Progress
+- **Target:** 2026-02-25
 
 ### 📅 Phase 5: Advanced Validation & Linting
 - [ ] Kiểm tra logic nâng cao.
@@ -55,6 +55,6 @@ Lộ trình phát triển n8n-custom-mcp từ một công cụ quản lý workfl
 - **Status:** Pending
 
 ## Success Metrics
-- [x] 19/31 Tools đã hoàn thành.
+- [x] 23/31 Tools đã hoàn thành.
 - [x] Test coverage > 85%.
 - [x] AI Agent có thể tự xây dựng workflow phức tạp.

@@ -9,11 +9,12 @@ import {
 import { workflowTools, handleWorkflowTool } from './tools/workflow-tools.js';
 import { credentialTools, handleCredentialTool } from './tools/credential-tools.js';
 import { validationTools, handleValidationTool } from './tools/validation-tools.js';
+import { templateTools, handleTemplateTool } from './tools/template-tools.js';
 
 const server = new Server(
   {
     name: 'n8n-custom-mcp',
-    version: '2.0.0-alpha',
+    version: '2.0.0-beta',
   },
   {
     capabilities: {
@@ -29,7 +30,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       ...workflowTools,
       ...credentialTools,
       ...validationTools,
-      // Future: templateTools, backupTools
+      ...templateTools,
     ],
   };
 });
@@ -48,6 +49,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       result = await handleCredentialTool(name, args || {});
     } else if (validationTools.some(t => t.name === name)) {
       result = await handleValidationTool(name, args || {});
+    } else if (templateTools.some(t => t.name === name)) {
+      result = await handleTemplateTool(name, args || {});
     } else {
       throw new Error(`Unknown tool: ${name}`);
     }

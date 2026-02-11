@@ -132,3 +132,42 @@ get_workflow → Lưu JSON hiện tại → update_workflow hoặc delete_workfl
 ```
 
 AI agent nên được dặn trong System Prompt: "Luôn đọc workflow hiện tại trước khi sửa hoặc xoá."
+
+---
+
+## Template System (Phase 3)
+
+Hệ thống template cho phép AI agent tìm kiếm và sử dụng các workflow mẫu từ thư viện chính thức của n8n.io.
+
+### Quy trình sử dụng Template
+
+1. **Tìm kiếm**: Dùng `search_templates` để tìm ý tưởng.
+2. **Xem chi tiết**: Dùng `get_template_details` để xem các nodes và credentials cần thiết.
+3. **Import**: Dùng `import_template` để đưa vào instance của bạn.
+
+### Ví dụ: Import workflow mẫu
+
+```markdown
+Bạn: "Tìm và cài đặt workflow mẫu để gửi thông báo từ GitHub sang Telegram"
+
+AI tự động thực hiện:
+  1. search_templates (query: "github telegram") → Trả về danh sách templates
+  2. get_template_details (id: "123") → Kiểm tra các nodes cần thiết
+  3. import_template (templateId: "123") → Import vào n8n (mặc định ở trạng thái Inactive)
+  4. Trả lời: "Tôi đã import workflow mẫu ID 123. Bạn cần cấu hình credentials để bắt đầu sử dụng."
+```
+
+### Xuất workflow thành template an toàn
+
+Khi muốn chia sẻ workflow hoặc lưu trữ dưới dạng mẫu, dùng `export_workflow_as_template`. Tool này sẽ tự động:
+- Xóa bỏ tất cả thông tin `credentials` (chỉ giữ lại mapping type).
+- Xóa bỏ `execution data` cũ.
+- Làm sạch các trường định danh cá nhân (ID, static data).
+
+```json
+// Gọi tool
+{
+  "workflowId": "42"
+}
+// Kết quả: Trả về JSON sạch, sẵn sàng để chia sẻ.
+```
