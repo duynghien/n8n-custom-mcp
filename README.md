@@ -22,7 +22,7 @@
 
 Các MCP Server hiện tại cho n8n (ví dụ [`czlonkowski/n8n-mcp`](https://github.com/czlonkowski/n8n-mcp)) chỉ hỗ trợ **đọc và chạy** workflow. Bạn không thể tạo mới, chỉnh sửa, xoá, hay test webhook từ AI agent.
 
-**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **17 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
+**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **19 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
 
 | Khả năng | MCP Server khác | n8n-custom-mcp |
 |:---------|:---:|:---:|
@@ -45,6 +45,9 @@ Tạo, đọc, sửa, xoá workflow hoàn toàn qua MCP — AI agent có thể t
 
 ### 🔐 Credentials Management (NEW in v2.0)
 Quản lý credentials hoàn toàn tự động:\n- Tạo, cập nhật, xoá credentials với validation\n- Liệt kê credentials từ workflows và database\n- Test credential validity tự động\n- Safety checks ngăn chặn xoá credentials đang sử dụng
+
+### ✅ Workflow Validation (NEW in v2.0)
+Kiểm tra cấu trúc workflow trước khi deploy để ngăn chặn lỗi:\n- Validate cấu trúc JSON và các trường bắt buộc\n- Phát hiện duplicate node IDs/names\n- Kiểm tra node types có tồn tại trên instance\n- Validate connections giữa các nodes\n- Phát hiện circular dependencies (vòng lặp)\n- Cảnh báo missing trigger nodes cho active workflows\n- Giảm 50% thời gian debug của AI agent
 
 ### 🎯 Webhook Testing
 Tool `trigger_webhook` hỗ trợ:
@@ -132,7 +135,7 @@ Trong phần cấu hình MCP Plugin:
 | Type | MCP (Streamable HTTP) |
 | URL | `http://<IP-máy-chủ>:3000/mcp` |
 
-Sau khi kết nối, bạn sẽ thấy **12 tools** xuất hiện. ✅
+Sau khi kết nối, bạn sẽ thấy **19 tools** xuất hiện. ✅
 
 ## ⚙️ Cấu hình
 

@@ -59,6 +59,19 @@ export interface N8nCredentialSchema {
   }>;
 }
 
+// Connection types
+export interface N8nConnection {
+  node: string;
+  type: string;
+  index: number;
+}
+
+export interface N8nConnections {
+  [sourceNodeId: string]: {
+    [outputType: string]: N8nConnection[][][];
+  };
+}
+
 // Template types
 export interface N8nTemplate {
   id: string;
