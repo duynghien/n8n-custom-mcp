@@ -5,8 +5,7 @@ export const N8N_HOST = process.env.N8N_HOST || 'http://localhost:5678';
 export const N8N_API_KEY = process.env.N8N_API_KEY;
 
 if (!N8N_API_KEY) {
-  console.error("Error: N8N_API_KEY environment variable is required");
-  process.exit(1);
+  throw new Error("N8N_API_KEY environment variable is required");
 }
 
 // n8n API client with authentication
