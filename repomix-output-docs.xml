@@ -1,0 +1,5405 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: src/**/*.ts, docs/*.md, README.md
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+src/
+  __tests__/
+    integration/
+      template-flow.test.ts
+    services/
+      credential-service.test.ts
+      n8n-api-service.test.ts
+      template-service.test.ts
+      validation-service.test.ts
+    tools/
+      credential-tools.test.ts
+      template-tools.test.ts
+      validation-tools.test.ts
+      workflow-tools.test.ts
+    utils/
+      expression-validator.test.ts
+      workflow-cleaner.test.ts
+      workflow-graph-analyzer.test.ts
+    setup.ts
+  config/
+    env.ts
+  services/
+    credential-service.ts
+    credential-test-service.ts
+    n8n-api-service.ts
+    template-service.ts
+    validation-service.ts
+  tools/
+    credential-tools.ts
+    template-tools.ts
+    validation-tools.ts
+    workflow-tools.ts
+  types/
+    n8n-types.ts
+    template-types.ts
+  utils/
+    error-handler.ts
+    expression-validator.ts
+    template-cache.ts
+    template-import-helpers.ts
+    workflow-cleaner.ts
+    workflow-graph-analyzer.ts
+  index.ts
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/__tests__/integration/template-flow.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock env config before other imports
+vi.mock('../../config/env.js', () => ({
+  N8N_HOST: 'http://localhost:5678',
+  N8N_API_KEY: 'test-key',
+  n8nClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
+  webhookClient: {
+    request: vi.fn(),
+  },
+}));
+
+import { handleTemplateTool } from '../../tools/template-tools.js';
+import { templateService } from '../../services/template-service.js';
+import { n8nApi } from '../../services/n8n-api-service.js';
+import axios from 'axios';
+
+// Create a local instance for the test or use the imported one but ensure it's properly initialized
+// Since template-service.ts exports a singleton, we need to be careful with its internal axios instance
+
+vi.mock('axios');
+vi.mock('../../services/n8n-api-service.js');
+
+describe('Template Flow Integration', () => {
+  let mockAxios: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAxios = {
+      get: vi.fn(),
+    };
+    vi.mocked(axios.create).mockReturnValue(mockAxios);
+    vi.spyOn(axios, 'isAxiosError').mockReturnValue(false);
+    templateService.clearCache();
+  });
+
+  it('should complete full search-detail-import flow', async () => {
+    // 1. Search templates
+    const mockSearchResults = {
+      data: {
+        workflows: [{ id: 1, name: 'GitHub Integration' }],
+        total: 1
+      }
+    };
+    mockAxios.get.mockImplementation(async (url: string) => {
+      if (url === '/templates/search') return mockSearchResults;
+      if (url === '/templates/workflows/1') return {
+        data: {
+          id: 1,
+          name: 'GitHub Integration',
+          workflow: {
+            nodes: [{ id: 'old-id', type: 'n8n-nodes-base.github', credentials: { githubApi: { id: 'template-cred' } } }],
+            connections: {}
+          }
+        }
+      };
+      throw new Error('Not found');
+    });
+
+    // Re-initialize templateService to use the mocked axios
+    (templateService as any).templateClient = mockAxios;
+
+    const searchResult = await handleTemplateTool('search_templates', {
+      query: 'github',
+    });
+    expect(searchResult.templates).toHaveLength(1);
+    expect(searchResult.templates[0].id).toBe(1);
+
+    // 2. Get template details - already handled by mockImplementation above
+
+    const template = await handleTemplateTool('get_template_details', {
+      id: 1,
+    });
+    expect(template.workflow.nodes).toHaveLength(1);
+
+    // 3. Import template
+    vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'n8n-nodes-base.github' }] as any);
+    vi.mocked(n8nApi.createWorkflow).mockResolvedValue({ id: 'new-wf-123', name: 'GitHub Integration' } as any);
+
+    const imported = await handleTemplateTool('import_template', {
+      templateId: 1,
+      credentialMapping: { 'template-cred': 'real-cred-id' }
+    });
+
+    expect(imported.id).toBe('new-wf-123');
+    expect(n8nApi.createWorkflow).toHaveBeenCalled();
+    const createdWf = vi.mocked(n8nApi.createWorkflow).mock.calls[0][0];
+    expect(createdWf.nodes[0].credentials.githubApi.id).toBe('real-cred-id');
+    expect(createdWf.nodes[0].id).not.toBe('old-id');
+  });
+
+  it('should handle export and potential re-import', async () => {
+    // 1. Export workflow
+    const mockWorkflow = {
+      id: 'wf-123',
+      name: 'My Workflow',
+      nodes: [
+        { id: 'n1', type: 'Set', credentials: { myCred: { id: 'c1' } } }
+      ],
+      staticData: { lastRun: '2023' }
+    };
+    vi.mocked(n8nApi.getWorkflow).mockResolvedValue(mockWorkflow as any);
+
+    const exported = await handleTemplateTool('export_workflow_as_template', {
+      workflowId: 'wf-123',
+    });
+
+    expect(exported.id).toBeUndefined();
+    expect(exported.nodes[0].credentials).toBeUndefined();
+    expect(exported.staticData).toBeUndefined();
+    expect(exported.name).toBe('My Workflow');
+
+    // 2. In a real scenario, this exported JSON would be used with create_workflow
+    // We verify the exported format is compatible with n8n workflow structure
+    expect(exported.nodes).toBeDefined();
+    expect(Array.isArray(exported.nodes)).toBe(true);
+  });
+
+  it('should fail import if required nodes are missing', async () => {
+    mockAxios.get.mockImplementation(async (url: string) => {
+      if (url === '/templates/workflows/1') {
+        return {
+          data: {
+            id: 1,
+            workflow: { nodes: [{ type: 'missing.node' }] }
+          }
+        };
+      }
+      throw new Error('Not found');
+    });
+    (templateService as any).templateClient = mockAxios;
+    vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'existing.node' }] as any);
+
+    await expect(handleTemplateTool('import_template', {
+      templateId: 1
+    })).rejects.toThrow(/Missing nodes: missing.node/);
+  });
+
+  it('should use cache for subsequent requests in the flow', async () => {
+    mockAxios.get.mockImplementation(async () => ({ data: { id: 1, workflow: { nodes: [] } } }));
+    (templateService as any).templateClient = mockAxios;
+
+    await handleTemplateTool('get_template_details', { id: 1 });
+    await handleTemplateTool('get_template_details', { id: 1 });
+
+    expect(mockAxios.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle search results with no matches gracefully', async () => {
+    mockAxios.get.mockImplementation(async () => ({ data: { workflows: [], total: 0 } }));
+    (templateService as any).templateClient = mockAxios;
+
+    const result = await handleTemplateTool('search_templates', { query: 'nothing' });
+    expect(result.templates).toHaveLength(0);
+    expect(result.total).toBe(0);
+  });
+
+  it('should properly map multiple credentials', async () => {
+    const mockTemplate = {
+      data: {
+        id: 2,
+        workflow: {
+          nodes: [
+            { type: 'n1', credentials: { c1: { id: 't1' } } },
+            { type: 'n2', credentials: { c2: { id: 't2' } } }
+          ]
+        }
+      }
+    };
+    mockAxios.get.mockImplementation(async (url: string) => {
+      if (url === '/templates/workflows/2') return mockTemplate;
+      throw new Error('Not found');
+    });
+    (templateService as any).templateClient = mockAxios;
+    vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'n1' }, { name: 'n2' }] as any);
+    vi.mocked(n8nApi.createWorkflow).mockResolvedValue({ id: 'imported' } as any);
+
+    await handleTemplateTool('import_template', {
+      templateId: 2,
+      credentialMapping: { 't1': 'r1', 't2': 'r2' }
+    });
+
+    const created = vi.mocked(n8nApi.createWorkflow).mock.calls[0][0];
+    expect(created.nodes[0].credentials.c1.id).toBe('r1');
+    expect(created.nodes[1].credentials.c2.id).toBe('r2');
+  });
+});
+</file>
+
+<file path="src/__tests__/services/template-service.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock env config before other imports
+vi.mock('../../config/env.js', () => ({
+  N8N_HOST: 'http://localhost:5678',
+  N8N_API_KEY: 'test-key',
+  n8nClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
+  webhookClient: {
+    request: vi.fn(),
+  },
+}));
+
+import { TemplateService } from '../../services/template-service.js';
+import { n8nApi } from '../../services/n8n-api-service.js';
+import axios from 'axios';
+
+// Mock dependencies
+vi.mock('axios');
+vi.mock('../../services/n8n-api-service.js');
+
+describe('TemplateService', () => {
+  let templateService: TemplateService;
+  let mockAxios: any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    // Setup axios mock
+    mockAxios = {
+      get: vi.fn(),
+    };
+    vi.mocked(axios.create).mockReturnValue(mockAxios);
+
+    templateService = new TemplateService();
+    (templateService as any).templateClient = mockAxios;
+    templateService.clearCache();
+  });
+
+  describe('searchTemplates', () => {
+    it('should search templates by query', async () => {
+      const mockResponse = {
+        data: {
+          workflows: [
+            { id: 1, name: 'GitHub to Slack', nodes: 5 },
+          ],
+          total: 1,
+        },
+      };
+
+      mockAxios.get.mockResolvedValue(mockResponse);
+
+      const result = await templateService.searchTemplates('github slack');
+
+      expect(mockAxios.get).toHaveBeenCalledWith('/templates/search', {
+        params: { q: 'github slack', category: undefined },
+      });
+      expect(result.templates).toHaveLength(1);
+      expect(result.templates[0].name).toBe('GitHub to Slack');
+      expect(result.total).toBe(1);
+    });
+
+    it('should handle category filter', async () => {
+      mockAxios.get.mockResolvedValue({ data: { workflows: [], total: 0 } });
+      await templateService.searchTemplates('test', 'Utility');
+      expect(mockAxios.get).toHaveBeenCalledWith('/templates/search', {
+        params: { q: 'test', category: 'Utility' },
+      });
+    });
+
+    it('should return empty result on 404', async () => {
+      mockAxios.get.mockImplementation(async () => {
+        const err: any = new Error('Not Found');
+        err.isAxiosError = true;
+        err.response = { status: 404 };
+        throw err;
+      });
+
+      // We need to mock axios.isAxiosError because the service uses it
+      vi.spyOn(axios, 'isAxiosError').mockReturnValue(true);
+
+      const result = await templateService.searchTemplates('nonexistent');
+      expect(result.templates).toEqual([]);
+      expect(result.total).toBe(0);
+    });
+
+    it('should cache search results', async () => {
+      mockAxios.get.mockResolvedValue({ data: { workflows: [{ id: 1 }], total: 1 } });
+
+      // First call
+      await templateService.searchTemplates('query');
+      // Second call (should use cache)
+      await templateService.searchTemplates('query');
+
+      expect(mockAxios.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw error for other failures', async () => {
+      mockAxios.get.mockRejectedValue(new Error('Network Error'));
+      await expect(templateService.searchTemplates('test')).rejects.toThrow('Failed to search templates: Network Error');
+    });
+  });
+
+  describe('getTemplateDetails', () => {
+    it('should fetch template details', async () => {
+      const mockTemplate = { id: 1, workflow: { nodes: [] } };
+      mockAxios.get.mockResolvedValue({ data: mockTemplate });
+
+      const result = await templateService.getTemplateDetails(1);
+
+      expect(mockAxios.get).toHaveBeenCalledWith('/templates/workflows/1');
+      expect(result).toEqual(mockTemplate);
+    });
+
+    it('should cache template details', async () => {
+      mockAxios.get.mockResolvedValue({ data: { id: 1 } });
+
+      await templateService.getTemplateDetails(1);
+      await templateService.getTemplateDetails(1);
+
+      expect(mockAxios.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('should throw error when template not found', async () => {
+      mockAxios.get.mockRejectedValue(new Error('404'));
+      await expect(templateService.getTemplateDetails(1)).rejects.toThrow('Template 1 not found or unavailable');
+    });
+  });
+
+  describe('importTemplate', () => {
+    it('should import template with credential mapping', async () => {
+      const mockTemplate = {
+        id: 1,
+        workflow: {
+          nodes: [
+            { id: '1', type: 'GitHub', credentials: { githubApi: { id: 'temp-1' } } },
+          ],
+        },
+      };
+
+      mockAxios.get.mockResolvedValue({ data: mockTemplate });
+      vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'GitHub' }] as any);
+      vi.mocked(n8nApi.createWorkflow).mockResolvedValue({ id: '999' } as any);
+
+      const result = await templateService.importTemplate(1, {
+        credentialMapping: { 'temp-1': 'cred-real-123' },
+      });
+
+      expect(result.id).toBe('999');
+      expect(n8nApi.createWorkflow).toHaveBeenCalled();
+      const createdWorkflow = vi.mocked(n8nApi.createWorkflow).mock.calls[0][0];
+      expect(createdWorkflow.nodes[0].credentials.githubApi.id).toBe('cred-real-123');
+    });
+
+    it('should throw error for missing nodes', async () => {
+      const mockTemplate = {
+        id: 1,
+        workflow: {
+          nodes: [{ id: '1', type: 'CustomNode' }],
+        },
+      };
+
+      mockAxios.get.mockResolvedValue({ data: mockTemplate });
+      vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'Set' }] as any);
+
+      await expect(templateService.importTemplate(1)).rejects.toThrow(
+        'Missing nodes: CustomNode'
+      );
+    });
+
+    it('should skip node validation if requested', async () => {
+      const mockTemplate = { id: 1, workflow: { nodes: [] } };
+      mockAxios.get.mockResolvedValue({ data: mockTemplate });
+      vi.mocked(n8nApi.createWorkflow).mockResolvedValue({ id: '999' } as any);
+
+      await templateService.importTemplate(1, { skipNodeValidation: true });
+
+      expect(n8nApi.listNodeTypes).not.toHaveBeenCalled();
+    });
+
+    it('should handle importInactive option', async () => {
+      const mockTemplate = { id: 1, workflow: { nodes: [], active: true } };
+      mockAxios.get.mockResolvedValue({ data: mockTemplate });
+      vi.mocked(n8nApi.createWorkflow).mockResolvedValue({ id: '999' } as any);
+
+      // Default is importInactive: undefined -> workflow.active = options.importInactive === false -> false
+      await templateService.importTemplate(1);
+      expect(vi.mocked(n8nApi.createWorkflow).mock.calls[0][0].active).toBe(false);
+
+      // importInactive: true -> false
+      await templateService.importTemplate(1, { importInactive: true });
+      expect(vi.mocked(n8nApi.createWorkflow).mock.calls[1][0].active).toBe(false);
+
+      // importInactive: false -> true
+      await templateService.importTemplate(1, { importInactive: false });
+      expect(vi.mocked(n8nApi.createWorkflow).mock.calls[2][0].active).toBe(true);
+    });
+  });
+
+  describe('exportWorkflow', () => {
+    it('should export workflow safely by default', async () => {
+      const mockWorkflow = {
+        id: '123',
+        nodes: [
+          { id: '1', type: 'GitHub', credentials: { githubApi: { id: 'c1' } } }
+        ],
+        staticData: { lastRun: 'now' }
+      };
+
+      vi.mocked(n8nApi.getWorkflow).mockResolvedValue(mockWorkflow as any);
+
+      const result = await templateService.exportWorkflow('123');
+
+      expect(result.id).toBeUndefined();
+      expect(result.nodes[0].credentials).toBeUndefined();
+      expect(result.staticData).toBeUndefined();
+    });
+
+    it('should include credentials if requested', async () => {
+      const mockWorkflow = {
+        nodes: [{ credentials: { a: 1 } }]
+      };
+      vi.mocked(n8nApi.getWorkflow).mockResolvedValue(mockWorkflow as any);
+
+      const result = await templateService.exportWorkflow('123', { includeCredentials: true });
+      expect(result.nodes[0].credentials).toEqual({ a: 1 });
+    });
+
+    it('should include execution data if requested', async () => {
+      const mockWorkflow = {
+        staticData: { x: 1 },
+        pinData: { y: 2 },
+        nodes: []
+      };
+      vi.mocked(n8nApi.getWorkflow).mockResolvedValue(mockWorkflow as any);
+
+      const result = await templateService.exportWorkflow('123', { includeExecutionData: true });
+      expect(result.staticData).toEqual({ x: 1 });
+      expect(result.pinData).toEqual({ y: 2 });
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/tools/template-tools.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock env config before other imports
+vi.mock('../../config/env.js', () => ({
+  N8N_HOST: 'http://localhost:5678',
+  N8N_API_KEY: 'test-key',
+  n8nClient: {},
+  webhookClient: {},
+}));
+
+import { handleTemplateTool } from '../../tools/template-tools.js';
+import { templateService } from '../../services/template-service.js';
+
+// Mock template service
+vi.mock('../../services/template-service.js');
+
+describe('Template Tools', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('search_templates', () => {
+    it('should call templateService.searchTemplates', async () => {
+      vi.mocked(templateService.searchTemplates).mockResolvedValue({
+        templates: [{ id: 1, name: 'Test' } as any],
+        total: 1,
+      });
+
+      const result = await handleTemplateTool('search_templates', { query: 'test', category: 'Dev' });
+
+      expect(templateService.searchTemplates).toHaveBeenCalledWith('test', 'Dev');
+      expect(result.total).toBe(1);
+    });
+
+    it('should throw error for missing query', async () => {
+      await expect(handleTemplateTool('search_templates', {})).rejects.toThrow(
+        /Missing required parameters: query/
+      );
+    });
+  });
+
+  describe('get_template_details', () => {
+    it('should call templateService.getTemplateDetails', async () => {
+      const mockTemplate = { id: 123, workflow: {} };
+      vi.mocked(templateService.getTemplateDetails).mockResolvedValue(mockTemplate as any);
+
+      const result = await handleTemplateTool('get_template_details', { id: 123 });
+
+      expect(templateService.getTemplateDetails).toHaveBeenCalledWith(123);
+      expect(result).toEqual(mockTemplate);
+    });
+
+    it('should throw error for missing id', async () => {
+      await expect(handleTemplateTool('get_template_details', {})).rejects.toThrow(
+        /Missing required parameters: id/
+      );
+    });
+  });
+
+  describe('import_template', () => {
+    it('should call templateService.importTemplate with correct options', async () => {
+      vi.mocked(templateService.importTemplate).mockResolvedValue({ id: 'new-wf' } as any);
+
+      await handleTemplateTool('import_template', {
+        templateId: 456,
+        credentialMapping: { old: 'new' },
+        importInactive: false
+      });
+
+      expect(templateService.importTemplate).toHaveBeenCalledWith(456, {
+        credentialMapping: { old: 'new' },
+        skipNodeValidation: undefined,
+        importInactive: false
+      });
+    });
+
+    it('should default importInactive to true', async () => {
+      await handleTemplateTool('import_template', { templateId: 456 });
+      expect(templateService.importTemplate).toHaveBeenCalledWith(456, {
+        credentialMapping: undefined,
+        skipNodeValidation: undefined,
+        importInactive: true
+      });
+    });
+
+    it('should throw error for missing templateId', async () => {
+      await expect(handleTemplateTool('import_template', {})).rejects.toThrow(
+        /Missing required parameters: templateId/
+      );
+    });
+  });
+
+  describe('export_workflow_as_template', () => {
+    it('should call templateService.exportWorkflow with correct security defaults', async () => {
+      vi.mocked(templateService.exportWorkflow).mockResolvedValue({ nodes: [] });
+
+      await handleTemplateTool('export_workflow_as_template', {
+        workflowId: 'wf-123'
+      });
+
+      expect(templateService.exportWorkflow).toHaveBeenCalledWith('wf-123', {
+        includeCredentials: false,
+        stripIds: true
+      });
+    });
+
+    it('should allow overriding security defaults', async () => {
+      await handleTemplateTool('export_workflow_as_template', {
+        workflowId: 'wf-123',
+        includeCredentials: true,
+        stripIds: false
+      });
+
+      expect(templateService.exportWorkflow).toHaveBeenCalledWith('wf-123', {
+        includeCredentials: true,
+        stripIds: false
+      });
+    });
+
+    it('should throw error for missing workflowId', async () => {
+      await expect(handleTemplateTool('export_workflow_as_template', {})).rejects.toThrow(
+        /Missing required parameters: workflowId/
+      );
+    });
+  });
+
+  describe('error handling', () => {
+    it('should throw error for unknown tool', async () => {
+      await expect(handleTemplateTool('unknown_tool', {})).rejects.toThrow(
+        'Unknown template tool: unknown_tool'
+      );
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/utils/workflow-cleaner.test.ts">
+import { describe, it, expect } from 'vitest';
+import {
+  cleanWorkflowForImport,
+  stripCredentialsFromWorkflow,
+  stripSensitiveFields,
+} from '../../utils/workflow-cleaner.js';
+
+describe('workflow-cleaner', () => {
+  describe('cleanWorkflowForImport', () => {
+    it('should remove old IDs', () => {
+      const workflow = { id: '123', name: 'Test', nodes: [] };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.id).toBeUndefined();
+    });
+
+    it('should set active to false', () => {
+      const workflow = { active: true, nodes: [] };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.active).toBe(false);
+    });
+
+    it('should generate new node IDs', () => {
+      const workflow = {
+        nodes: [{ id: 'old-1', type: 'Set' }, { id: 'old-2', type: 'HTTP' }],
+      };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.nodes[0].id).not.toBe('old-1');
+      expect(cleaned.nodes[1].id).not.toBe('old-2');
+      expect(cleaned.nodes[0].id).toMatch(/^node-/);
+    });
+
+    it('should remove versionId, staticData, pinData', () => {
+      const workflow = {
+        versionId: 'v1',
+        staticData: { lastRun: '2023' },
+        pinData: { node: [{ data: {} }] },
+        nodes: []
+      };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.versionId).toBeUndefined();
+      expect(cleaned.staticData).toBeUndefined();
+      expect(cleaned.pinData).toBeUndefined();
+    });
+
+    it('should remove timestamps', () => {
+      const workflow = {
+        createdAt: '2023-01-01',
+        updatedAt: '2023-01-02',
+        nodes: []
+      };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.createdAt).toBeUndefined();
+      expect(cleaned.updatedAt).toBeUndefined();
+    });
+
+    it('should handle empty workflow', () => {
+      const cleaned = cleanWorkflowForImport(null);
+      expect(cleaned.name).toBe('Untitled');
+      expect(cleaned.nodes).toEqual([]);
+    });
+
+    it('should preserve connections if they exist', () => {
+      const workflow = {
+        nodes: [],
+        connections: { 'node-1': { main: [[]] } }
+      };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.connections).toEqual(workflow.connections);
+    });
+
+    it('should handle undefined nodes/connections', () => {
+      const workflow = { name: 'Test' };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.nodes).toEqual([]);
+    });
+
+    it('should produce unique IDs for each node even with same input IDs', () => {
+      const workflow = {
+        nodes: [{ id: 'a', type: 'Set' }, { id: 'a', type: 'Set' }]
+      };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.nodes[0].id).not.toBe(cleaned.nodes[1].id);
+    });
+
+    it('should maintain node types and parameters', () => {
+      const workflow = {
+        nodes: [{ id: '1', type: 'n8n-nodes-base.set', parameters: { values: {} } }]
+      };
+      const cleaned = cleanWorkflowForImport(workflow);
+      expect(cleaned.nodes[0].type).toBe('n8n-nodes-base.set');
+      expect(cleaned.nodes[0].parameters).toEqual({ values: {} });
+    });
+  });
+
+  describe('stripCredentialsFromWorkflow', () => {
+    it('should remove credentials from nodes', () => {
+      const workflow = {
+        nodes: [
+          { id: '1', type: 'GitHub', credentials: { githubApi: { id: 'cred-1' } } },
+          { id: '2', type: 'NoCred' }
+        ],
+      };
+      const cleaned = stripCredentialsFromWorkflow(workflow);
+      expect(cleaned.nodes[0].credentials).toBeUndefined();
+      expect(cleaned.nodes[1].credentials).toBeUndefined();
+    });
+
+    it('should handle null workflow', () => {
+      expect(stripCredentialsFromWorkflow(null)).toBeNull();
+    });
+
+    it('should handle workflow without nodes', () => {
+      const workflow = { name: 'Empty' };
+      const cleaned = stripCredentialsFromWorkflow(workflow);
+      expect(cleaned.nodes).toEqual([]);
+    });
+
+    it('should not affect other node properties', () => {
+      const workflow = {
+        nodes: [{ id: '1', type: 'Set', parameters: { x: 1 }, credentials: { a: 1 } }]
+      };
+      const cleaned = stripCredentialsFromWorkflow(workflow);
+      expect(cleaned.nodes[0].parameters).toEqual({ x: 1 });
+      expect(cleaned.nodes[0].id).toBe('1');
+    });
+  });
+
+  describe('stripSensitiveFields', () => {
+    it('should remove execution and instance data', () => {
+      const workflow = {
+        id: '123',
+        versionId: 'v1',
+        staticData: {},
+        pinData: {},
+        createdAt: '2023',
+        updatedAt: '2023'
+      };
+      const cleaned = stripSensitiveFields(workflow);
+      expect(cleaned.id).toBeUndefined();
+      expect(cleaned.versionId).toBeUndefined();
+      expect(cleaned.staticData).toBeUndefined();
+      expect(cleaned.pinData).toBeUndefined();
+      expect(cleaned.createdAt).toBeUndefined();
+      expect(cleaned.updatedAt).toBeUndefined();
+    });
+
+    it('should remove webhookId from nodes', () => {
+      const workflow = {
+        nodes: [
+          { id: '1', type: 'Webhook', webhookId: 'secret-uuid' },
+          { id: '2', type: 'Set' }
+        ]
+      };
+      const cleaned = stripSensitiveFields(workflow);
+      expect(cleaned.nodes[0].webhookId).toBeUndefined();
+      expect(cleaned.nodes[1].webhookId).toBeUndefined();
+    });
+
+    it('should handle null workflow', () => {
+      expect(stripSensitiveFields(null)).toBeNull();
+    });
+  });
+});
+</file>
+
+<file path="src/services/template-service.ts">
+import axios, { AxiosInstance } from 'axios';
+import { n8nApi } from './n8n-api-service.js';
+import {
+  cleanWorkflowForImport,
+  stripCredentialsFromWorkflow,
+  stripSensitiveFields,
+} from '../utils/workflow-cleaner.js';
+import { TemplateCache } from '../utils/template-cache.js';
+import {
+  applyCredentialMapping,
+  checkNodeCompatibility,
+} from '../utils/template-import-helpers.js';
+import type {
+  N8nTemplate,
+  TemplateSearchResult,
+  ImportTemplateOptions,
+  ExportWorkflowOptions,
+  N8nWorkflow,
+} from '../types/n8n-types.js';
+
+/**
+ * Service for managing n8n templates
+ * Handles search, import, export with caching
+ */
+export class TemplateService {
+  private templateClient: AxiosInstance;
+  private cache: TemplateCache = new TemplateCache();
+
+  constructor() {
+    this.templateClient = axios.create({
+      baseURL: 'https://api.n8n.io',
+      timeout: 10000,
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+  }
+
+  /**
+   * Search templates from n8n.io
+   */
+  async searchTemplates(
+    query: string,
+    category?: string
+  ): Promise<TemplateSearchResult> {
+    const cacheKey = `search:${query}:${category || 'all'}`;
+
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const response = await this.templateClient.get('/templates/search', {
+        params: { q: query, category },
+      });
+
+      const result: TemplateSearchResult = {
+        templates: response.data.workflows || [],
+        total: response.data.total || 0,
+      };
+
+      this.cache.set(cacheKey, result);
+      return result;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return { templates: [], total: 0 };
+      }
+      throw new Error(
+        `Failed to search templates: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Get full template details including workflow JSON
+   */
+  async getTemplateDetails(id: number): Promise<N8nTemplate> {
+    const cacheKey = `template:${id}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const response = await this.templateClient.get(`/templates/workflows/${id}`);
+      const template: N8nTemplate = response.data;
+
+      this.cache.set(cacheKey, template);
+      return template;
+    } catch (error) {
+      throw new Error(`Template ${id} not found or unavailable`);
+    }
+  }
+
+  /**
+   * Import template as new workflow
+   */
+  async importTemplate(
+    id: number,
+    options: ImportTemplateOptions = {}
+  ): Promise<N8nWorkflow> {
+    // 1. Get template
+    const template = await this.getTemplateDetails(id);
+
+    // 2. Check node compatibility (unless skipped)
+    if (!options.skipNodeValidation) {
+      const nodeTypes = await n8nApi.listNodeTypes();
+      const validation = await checkNodeCompatibility(template, nodeTypes);
+      if (!validation.compatible) {
+        throw new Error(
+          `Cannot import template: Missing nodes: ${validation.missingNodes.join(', ')}`
+        );
+      }
+    }
+
+    // 3. Clean workflow JSON
+    let workflow = cleanWorkflowForImport(template.workflow);
+
+    // 4. Apply credential mapping
+    if (options.credentialMapping) {
+      workflow = applyCredentialMapping(workflow, options.credentialMapping);
+    }
+
+    // 5. Set active status
+    workflow.active = options.importInactive === false;
+
+    // 6. Create workflow via n8n API
+    const created = await n8nApi.createWorkflow(workflow);
+
+    return created;
+  }
+
+  /**
+   * Export workflow as template (safe for sharing)
+   */
+  async exportWorkflow(
+    id: string,
+    options: ExportWorkflowOptions = {}
+  ): Promise<any> {
+    // 1. Get workflow
+    const workflow = await n8nApi.getWorkflow(id);
+
+    // 2. Strip credentials (default)
+    let cleaned = workflow;
+    if (options.includeCredentials !== true) {
+      cleaned = stripCredentialsFromWorkflow(cleaned);
+    }
+
+    // 3. Strip sensitive fields (default)
+    if (options.stripIds !== false) {
+      cleaned = stripSensitiveFields(cleaned);
+    }
+
+    // 4. Re-add execution data if requested (since stripSensitiveFields removes it)
+    if (options.includeExecutionData === true) {
+      cleaned.staticData = workflow.staticData;
+      cleaned.pinData = workflow.pinData;
+    }
+
+    return cleaned;
+  }
+
+  /**
+   * Clear all cache entries
+   */
+  clearCache(): void {
+    this.cache.clear();
+  }
+}
+
+// Export singleton instance
+export const templateService = new TemplateService();
+</file>
+
+<file path="src/tools/template-tools.ts">
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { templateService } from '../services/template-service.js';
+import { validateRequired } from '../utils/error-handler.js';
+
+/**
+ * Template management tools
+ */
+export const templateTools: Tool[] = [
+  {
+    name: 'search_templates',
+    description: 'Search n8n.io template library for workflow templates',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query (e.g., "github slack", "customer onboarding")',
+        },
+        category: {
+          type: 'string',
+          description: 'Filter by category (e.g., "Development", "Marketing")',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_template_details',
+    description: 'Get full workflow JSON for a template',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'number',
+          description: 'Template ID from search results',
+        },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'import_template',
+    description: 'Import template as new workflow with dependency resolution',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        templateId: {
+          type: 'number',
+          description: 'Template ID to import',
+        },
+        credentialMapping: {
+          type: 'object',
+          description: 'Map template credential IDs to existing credentials',
+        },
+        skipNodeValidation: {
+          type: 'boolean',
+          description: 'Skip checking if nodes exist (advanced)',
+        },
+        importInactive: {
+          type: 'boolean',
+          description: 'Import as inactive workflow (default: true)',
+        },
+      },
+      required: ['templateId'],
+    },
+  },
+  {
+    name: 'export_workflow_as_template',
+    description: 'Export workflow as JSON template (safe for sharing)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflowId: {
+          type: 'string',
+          description: 'Workflow ID to export',
+        },
+        includeCredentials: {
+          type: 'boolean',
+          description: 'Include credential data (INSECURE - default: false)',
+        },
+        stripIds: {
+          type: 'boolean',
+          description: 'Remove n8n instance-specific IDs (default: true)',
+        },
+      },
+      required: ['workflowId'],
+    },
+  },
+];
+
+/**
+ * Handle template tool calls
+ */
+export async function handleTemplateTool(
+  name: string,
+  args: Record<string, any>
+): Promise<any> {
+  switch (name) {
+    case 'search_templates':
+      validateRequired(args, ['query']);
+      return await templateService.searchTemplates(args.query, args.category);
+
+    case 'get_template_details':
+      validateRequired(args, ['id']);
+      return await templateService.getTemplateDetails(args.id);
+
+    case 'import_template':
+      validateRequired(args, ['templateId']);
+      return await templateService.importTemplate(args.templateId, {
+        credentialMapping: args.credentialMapping,
+        skipNodeValidation: args.skipNodeValidation,
+        importInactive: args.importInactive !== false,
+      });
+
+    case 'export_workflow_as_template':
+      validateRequired(args, ['workflowId']);
+      return await templateService.exportWorkflow(args.workflowId, {
+        includeCredentials: args.includeCredentials === true,
+        stripIds: args.stripIds !== false,
+      });
+
+    default:
+      throw new Error(`Unknown template tool: ${name}`);
+  }
+}
+</file>
+
+<file path="src/types/template-types.ts">
+import type { N8nWorkflow } from './n8n-types.js';
+
+/**
+ * n8n.io template structure
+ */
+export interface N8nTemplate {
+  id: number;
+  name: string;
+  description: string;
+  workflow: N8nWorkflow;
+  nodes: number;
+  categories: string[];
+  createdAt: string;
+}
+
+/**
+ * Template search result from n8n.io API
+ */
+export interface TemplateSearchResult {
+  templates: Array<{
+    id: number;
+    name: string;
+    description: string;
+    nodes: number;
+    categories: string[];
+  }>;
+  total: number;
+}
+
+/**
+ * Cache entry with TTL
+ */
+export interface TemplateCacheEntry {
+  data: any;
+  timestamp: number;
+  ttl: number;
+}
+
+/**
+ * Options for importing a template
+ */
+export interface ImportTemplateOptions {
+  credentialMapping?: Record<string, string>;
+  skipNodeValidation?: boolean;
+  importInactive?: boolean;
+}
+
+/**
+ * Options for exporting workflow as template
+ */
+export interface ExportWorkflowOptions {
+  includeCredentials?: boolean;
+  includeExecutionData?: boolean;
+  stripIds?: boolean;
+}
+</file>
+
+<file path="src/utils/template-cache.ts">
+import type { TemplateCacheEntry } from '../types/n8n-types.js';
+
+/**
+ * Simple in-memory cache with TTL support
+ */
+export class TemplateCache {
+  private cache: Map<string, TemplateCacheEntry> = new Map();
+  private readonly CACHE_TTL = 3600; // 1 hour
+  private readonly MAX_CACHE_SIZE = 100; // Prevent memory leak
+
+  /**
+   * Get data from cache if not expired
+   */
+  get(key: string): any | null {
+    if (!key || typeof key !== 'string') {
+      return null;
+    }
+
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+
+    const now = Date.now();
+    if (now - entry.timestamp > entry.ttl * 1000) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return entry.data;
+  }
+
+  /**
+   * Store data in cache with TTL
+   */
+  set(key: string, data: any): void {
+    if (!key || typeof key !== 'string') {
+      throw new Error('Cache key must be a non-empty string');
+    }
+
+    // Evict oldest entry if cache is full
+    if (this.cache.size >= this.MAX_CACHE_SIZE) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) {
+        this.cache.delete(firstKey);
+      }
+    }
+
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl: this.CACHE_TTL,
+    });
+  }
+
+  /**
+   * Clear all cache entries
+   */
+  clear(): void {
+    this.cache.clear();
+  }
+}
+</file>
+
+<file path="src/utils/template-import-helpers.ts">
+/**
+ * Apply credential mapping to workflow nodes
+ */
+export function applyCredentialMapping(
+  workflow: any,
+  mapping: Record<string, string>
+): any {
+  return {
+    ...workflow,
+    nodes: workflow.nodes?.map((node: any) => {
+      if (!node.credentials) return node;
+
+      const mappedCreds: any = {};
+      for (const [credType, credData] of Object.entries(node.credentials)) {
+        const templateCredId = (credData as any).id;
+        const mappedCredId = mapping[templateCredId];
+
+        if (mappedCredId) {
+          mappedCreds[credType] = { id: mappedCredId };
+        } else {
+          mappedCreds[credType] = { id: null };
+        }
+      }
+
+      return { ...node, credentials: mappedCreds };
+    }) || [],
+  };
+}
+
+/**
+ * Check if template nodes are compatible with current n8n instance
+ */
+export async function checkNodeCompatibility(
+  template: any,
+  availableNodeTypes: any[]
+): Promise<{
+  compatible: boolean;
+  missingNodes: string[];
+  warnings: string[];
+}> {
+  // Null safety check
+  if (!template || !template.workflow || !template.workflow.nodes) {
+    return {
+      compatible: false,
+      missingNodes: [],
+      warnings: ['Template workflow is missing or invalid'],
+    };
+  }
+
+  const availableTypes = new Set(availableNodeTypes.map((t: any) => t.name));
+
+  const templateNodeTypes = new Set(
+    template.workflow.nodes.map((n: any) => n.type)
+  );
+
+  const missingNodes = Array.from(templateNodeTypes).filter(
+    (type): type is string => typeof type === 'string' && !availableTypes.has(type)
+  );
+
+  const warnings: string[] = [];
+
+  // Check for community nodes
+  for (const nodeType of templateNodeTypes) {
+    if (typeof nodeType === 'string' && nodeType.startsWith('@')) {
+      warnings.push(
+        `Community node detected: ${nodeType} - may require manual installation`
+      );
+    }
+  }
+
+  return {
+    compatible: missingNodes.length === 0,
+    missingNodes,
+    warnings,
+  };
+}
+</file>
+
+<file path="src/utils/workflow-cleaner.ts">
+/**
+ * Utility functions for cleaning and sanitizing workflow data
+ * Used for template imports/exports
+ */
+
+import { randomUUID } from 'crypto';
+
+/**
+ * Generate unique node ID using UUID
+ */
+function generateNodeId(): string {
+  return `node-${randomUUID()}`;
+}
+
+/**
+ * Clean workflow for fresh import
+ * Removes old IDs, cached data, pin data
+ */
+export function cleanWorkflowForImport(workflow: any): any {
+  if (!workflow) {
+    return { name: 'Untitled', nodes: [], connections: {} };
+  }
+
+  return {
+    ...workflow,
+    id: undefined,
+    active: false,
+    staticData: undefined,
+    pinData: undefined,
+    versionId: undefined,
+    createdAt: undefined,
+    updatedAt: undefined,
+    nodes: workflow.nodes?.map((node: any) => ({
+      ...node,
+      id: generateNodeId(),
+    })) || [],
+  };
+}
+
+/**
+ * Strip credentials from workflow for secure export
+ * Removes all credential references
+ */
+export function stripCredentialsFromWorkflow(workflow: any): any {
+  if (!workflow) {
+    return workflow;
+  }
+
+  return {
+    ...workflow,
+    nodes: workflow.nodes?.map((node: any) => ({
+      ...node,
+      credentials: undefined,
+    })) || [],
+  };
+}
+
+/**
+ * Strip sensitive fields from workflow
+ * Removes execution history, webhook URLs, instance-specific data
+ */
+export function stripSensitiveFields(workflow: any): any {
+  if (!workflow) {
+    return workflow;
+  }
+
+  const cleaned = { ...workflow };
+
+  // Remove execution data
+  delete cleaned.staticData;
+  delete cleaned.pinData;
+
+  // Remove n8n instance-specific data
+  delete cleaned.id;
+  delete cleaned.versionId;
+  delete cleaned.createdAt;
+  delete cleaned.updatedAt;
+
+  // Remove webhook URLs and instance-specific node data
+  if (cleaned.nodes) {
+    cleaned.nodes = cleaned.nodes.map((node: any) => {
+      const cleanNode = { ...node };
+      if (node.webhookId) {
+        delete cleanNode.webhookId;
+      }
+      return cleanNode;
+    });
+  }
+
+  return cleaned;
+}
+</file>
+
+<file path="src/__tests__/services/credential-service.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { credentialService } from '../../services/credential-service.js';
+import { n8nApi } from '../../services/n8n-api-service.js';
+
+// Mock child_process BEFORE importing credential service
+vi.mock('child_process', () => ({
+  exec: vi.fn((cmd, callback) => {
+    // Simulate database not accessible
+    callback(new Error('Database not accessible'), '', '');
+  }),
+}));
+
+vi.mock('util', () => ({
+  promisify: vi.fn((fn) => {
+    return async (...args: any[]) => {
+      return new Promise((resolve, reject) => {
+        reject(new Error('Database not accessible'));
+      });
+    };
+  }),
+}));
+
+// Mock n8n API service
+vi.mock('../../services/n8n-api-service.js', () => ({
+  n8nApi: {
+    getCredentialSchema: vi.fn(),
+    listWorkflows: vi.fn(),
+    createCredential: vi.fn(),
+    updateCredential: vi.fn(),
+    deleteCredential: vi.fn(),
+    executeWorkflow: vi.fn(),
+    getExecution: vi.fn(),
+    createWorkflow: vi.fn(),
+    deleteWorkflow: vi.fn(),
+  },
+}));
+
+// Mock credential test service
+vi.mock('../../services/credential-test-service.js', () => ({
+  credentialTestService: {
+    testCredential: vi.fn(),
+  },
+}));
+
+describe('CredentialService', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getSchema', () => {
+    it('should get credential schema from API', async () => {
+      const mockSchema = {
+        type: 'githubApi',
+        displayName: 'GitHub API',
+        properties: [
+          { name: 'accessToken', type: 'string', required: true },
+        ],
+      };
+      vi.mocked(n8nApi.getCredentialSchema).mockResolvedValue(mockSchema);
+
+      const result = await credentialService.getSchema('githubApi');
+
+      expect(n8nApi.getCredentialSchema).toHaveBeenCalledWith('githubApi');
+      expect(result).toEqual(mockSchema);
+    });
+
+    it('should handle schema not found error', async () => {
+      vi.mocked(n8nApi.getCredentialSchema).mockRejectedValue(
+        new Error('Schema not found')
+      );
+
+      await expect(credentialService.getSchema('invalidType')).rejects.toThrow();
+    });
+  });
+
+  describe('listFromWorkflows', () => {
+    it('should parse credentials from workflows', async () => {
+      const mockWorkflows = {
+        data: [
+          {
+            id: '1',
+            name: 'Test Workflow',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'GitHub',
+                type: 'n8n-nodes-base.github',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  githubApi: {
+                    id: 'cred1',
+                    name: 'GitHub Account',
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockWorkflows);
+
+      const result = await credentialService.listCredentials();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({
+        id: 'cred1',
+        name: 'GitHub Account',
+        type: 'githubApi',
+      });
+    });
+
+    it('should handle workflows without credentials', async () => {
+      const mockWorkflows = {
+        data: [
+          {
+            id: '1',
+            name: 'Test Workflow',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'Set',
+                type: 'n8n-nodes-base.set',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockWorkflows);
+
+      const result = await credentialService.listCredentials();
+
+      expect(result).toHaveLength(0);
+    });
+
+    it('should deduplicate credentials', async () => {
+      const mockWorkflows = {
+        data: [
+          {
+            id: '1',
+            name: 'Workflow 1',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'GitHub',
+                type: 'n8n-nodes-base.github',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  githubApi: { id: 'cred1', name: 'GitHub' },
+                },
+              },
+            ],
+          },
+          {
+            id: '2',
+            name: 'Workflow 2',
+            nodes: [
+              {
+                id: 'node2',
+                name: 'GitHub',
+                type: 'n8n-nodes-base.github',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  githubApi: { id: 'cred1', name: 'GitHub' },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockWorkflows);
+
+      const result = await credentialService.listCredentials();
+
+      expect(result).toHaveLength(1);
+    });
+
+    it('should filter credentials by type', async () => {
+      const mockWorkflows = {
+        data: [
+          {
+            id: '1',
+            name: 'Test',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'GitHub',
+                type: 'n8n-nodes-base.github',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  githubApi: { id: 'cred1', name: 'GitHub' },
+                },
+              },
+              {
+                id: 'node2',
+                name: 'Slack',
+                type: 'n8n-nodes-base.slack',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  slackApi: { id: 'cred2', name: 'Slack' },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockWorkflows);
+
+      const result = await credentialService.listCredentials('githubApi');
+
+      expect(result).toHaveLength(1);
+      expect(result[0].type).toBe('githubApi');
+    });
+  });
+
+  describe('validateCredentialData', () => {
+    it('should validate required fields', async () => {
+      const mockSchema = {
+        type: 'githubApi',
+        displayName: 'GitHub API',
+        properties: [
+          { name: 'accessToken', type: 'string', required: true },
+        ],
+      };
+      vi.mocked(n8nApi.getCredentialSchema).mockResolvedValue(mockSchema);
+
+      const result = await credentialService.validateCredentialData('githubApi', {
+        accessToken: 'test_token',
+      });
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should detect missing required fields', async () => {
+      const mockSchema = {
+        type: 'githubApi',
+        displayName: 'GitHub API',
+        properties: [
+          { name: 'accessToken', type: 'string', required: true },
+        ],
+      };
+      vi.mocked(n8nApi.getCredentialSchema).mockResolvedValue(mockSchema);
+
+      const result = await credentialService.validateCredentialData('githubApi', {});
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Missing required field: accessToken');
+    });
+
+    it('should validate field types', async () => {
+      const mockSchema = {
+        type: 'testApi',
+        displayName: 'Test API',
+        properties: [
+          { name: 'token', type: 'string', required: false },
+          { name: 'port', type: 'number', required: false },
+        ],
+      };
+      vi.mocked(n8nApi.getCredentialSchema).mockResolvedValue(mockSchema);
+
+      const result = await credentialService.validateCredentialData('testApi', {
+        token: 123, // Wrong type
+        port: '8080', // Wrong type
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('Field token must be a string');
+      expect(result.errors).toContain('Field port must be a number');
+    });
+  });
+
+  describe('createCredential', () => {
+    it('should create credential with validation', async () => {
+      const mockSchema = {
+        type: 'githubApi',
+        displayName: 'GitHub API',
+        properties: [
+          { name: 'accessToken', type: 'string', required: true },
+        ],
+      };
+      const mockCreated = {
+        id: '123',
+        name: 'Test GitHub',
+        type: 'githubApi',
+        data: { accessToken: 'test_token' },
+      };
+
+      vi.mocked(n8nApi.getCredentialSchema).mockResolvedValue(mockSchema);
+      // Mock listWorkflows for duplicate check (called by listCredentials)
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue({ data: [] });
+      vi.mocked(n8nApi.createCredential).mockResolvedValue(mockCreated);
+
+      const result = await credentialService.createCredential({
+        name: 'Test GitHub',
+        type: 'githubApi',
+        data: { accessToken: 'test_token' },
+      });
+
+      expect(n8nApi.createCredential).toHaveBeenCalled();
+      expect(result).toEqual(mockCreated);
+    });
+
+    it('should reject invalid credential data', async () => {
+      const mockSchema = {
+        type: 'githubApi',
+        displayName: 'GitHub API',
+        properties: [
+          { name: 'accessToken', type: 'string', required: true },
+        ],
+      };
+
+      vi.mocked(n8nApi.getCredentialSchema).mockResolvedValue(mockSchema);
+      // Mock listWorkflows to avoid database call
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue({ data: [] });
+
+      await expect(
+        credentialService.createCredential({
+          name: 'Test',
+          type: 'githubApi',
+          data: {}, // Missing required field
+        })
+      ).rejects.toThrow('Validation failed');
+    });
+  });
+
+  describe('getCredentialUsage', () => {
+    it('should find workflows using credential', async () => {
+      const mockWorkflows = {
+        data: [
+          {
+            id: 'wf1',
+            name: 'Workflow 1',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'GitHub',
+                type: 'n8n-nodes-base.github',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  githubApi: { id: 'cred1', name: 'GitHub' },
+                },
+              },
+            ],
+          },
+          {
+            id: 'wf2',
+            name: 'Workflow 2',
+            nodes: [
+              {
+                id: 'node2',
+                name: 'Slack',
+                type: 'n8n-nodes-base.slack',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  slackApi: { id: 'cred2', name: 'Slack' },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockWorkflows);
+
+      const result = await credentialService.getCredentialUsage('cred1');
+
+      expect(result).toEqual(['wf1']);
+    });
+  });
+
+  describe('deleteCredential', () => {
+    it('should delete credential when not in use', async () => {
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue({ data: [] });
+      vi.mocked(n8nApi.deleteCredential).mockResolvedValue(undefined);
+
+      await credentialService.deleteCredential('cred1');
+
+      expect(n8nApi.deleteCredential).toHaveBeenCalledWith('cred1');
+    });
+
+    it('should block delete if credential in use', async () => {
+      const mockWorkflows = {
+        data: [
+          {
+            id: 'wf1',
+            name: 'Workflow 1',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'GitHub',
+                type: 'n8n-nodes-base.github',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  githubApi: { id: 'cred1', name: 'GitHub' },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockWorkflows);
+
+      await expect(
+        credentialService.deleteCredential('cred1', false)
+      ).rejects.toThrow('Credential is used by');
+    });
+
+    it('should force delete if requested', async () => {
+      const mockWorkflows = {
+        data: [
+          {
+            id: 'wf1',
+            name: 'Workflow 1',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'GitHub',
+                type: 'n8n-nodes-base.github',
+                typeVersion: 1,
+                position: [0, 0],
+                parameters: {},
+                credentials: {
+                  githubApi: { id: 'cred1', name: 'GitHub' },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockWorkflows);
+      vi.mocked(n8nApi.deleteCredential).mockResolvedValue(undefined);
+
+      await credentialService.deleteCredential('cred1', true);
+
+      expect(n8nApi.deleteCredential).toHaveBeenCalledWith('cred1');
+    });
+  });
+
+  describe('updateCredential', () => {
+    it('should update credential', async () => {
+      const mockUpdated = {
+        id: '123',
+        name: 'Updated Name',
+        type: 'githubApi',
+      };
+      vi.mocked(n8nApi.updateCredential).mockResolvedValue(mockUpdated);
+
+      const result = await credentialService.updateCredential('123', {
+        name: 'Updated Name',
+      });
+
+      expect(n8nApi.updateCredential).toHaveBeenCalledWith('123', {
+        name: 'Updated Name',
+      });
+      expect(result).toEqual(mockUpdated);
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/services/n8n-api-service.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { N8nApiService } from '../../services/n8n-api-service.js';
+import { n8nClient, webhookClient } from '../../config/env.js';
+
+// Mock axios clients
+vi.mock('../../config/env.js', () => ({
+  n8nClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
+  webhookClient: {
+    request: vi.fn(),
+  },
+  N8N_HOST: 'http://localhost:5678',
+  N8N_API_KEY: 'test-key',
+}));
+
+describe('N8nApiService', () => {
+  let service: N8nApiService;
+
+  beforeEach(() => {
+    service = new N8nApiService();
+    vi.clearAllMocks();
+  });
+
+  describe('Workflow Operations', () => {
+    it('should list workflows successfully', async () => {
+      const mockData = { data: [{ id: '1', name: 'Test Workflow' }] };
+      vi.mocked(n8nClient.get).mockResolvedValue({ data: mockData });
+
+      const result = await service.listWorkflows();
+
+      expect(n8nClient.get).toHaveBeenCalledWith('/workflows', { params: undefined });
+      expect(result).toEqual(mockData);
+    });
+
+    it('should get workflow by id', async () => {
+      const mockWorkflow = { id: '123', name: 'Test' };
+      vi.mocked(n8nClient.get).mockResolvedValue({ data: mockWorkflow });
+
+      const result = await service.getWorkflow('123');
+
+      expect(n8nClient.get).toHaveBeenCalledWith('/workflows/123');
+      expect(result).toEqual(mockWorkflow);
+    });
+
+    it('should create workflow', async () => {
+      const mockWorkflow = { name: 'New Workflow' };
+      const mockResponse = { id: '456', ...mockWorkflow };
+      vi.mocked(n8nClient.post).mockResolvedValue({ data: mockResponse });
+
+      const result = await service.createWorkflow(mockWorkflow);
+
+      expect(n8nClient.post).toHaveBeenCalledWith('/workflows', mockWorkflow);
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should update workflow', async () => {
+      const mockUpdate = { name: 'Updated' };
+      const mockResponse = { id: '123', ...mockUpdate };
+      vi.mocked(n8nClient.put).mockResolvedValue({ data: mockResponse });
+
+      const result = await service.updateWorkflow('123', mockUpdate);
+
+      expect(n8nClient.put).toHaveBeenCalledWith('/workflows/123', mockUpdate);
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should delete workflow', async () => {
+      vi.mocked(n8nClient.delete).mockResolvedValue({ data: {} });
+
+      await service.deleteWorkflow('123');
+
+      expect(n8nClient.delete).toHaveBeenCalledWith('/workflows/123');
+    });
+
+    it('should activate workflow', async () => {
+      const mockResponse = { id: '123', active: true };
+      vi.mocked(n8nClient.post).mockResolvedValue({ data: mockResponse });
+
+      const result = await service.activateWorkflow('123', true);
+
+      expect(n8nClient.post).toHaveBeenCalledWith('/workflows/123/activate');
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should deactivate workflow', async () => {
+      const mockResponse = { id: '123', active: false };
+      vi.mocked(n8nClient.post).mockResolvedValue({ data: mockResponse });
+
+      const result = await service.activateWorkflow('123', false);
+
+      expect(n8nClient.post).toHaveBeenCalledWith('/workflows/123/deactivate');
+      expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('Execution Operations', () => {
+    it('should list executions', async () => {
+      const mockData = { data: [{ id: 'exec1', finished: true }] };
+      vi.mocked(n8nClient.get).mockResolvedValue({ data: mockData });
+
+      const result = await service.listExecutions({ limit: 10 });
+
+      expect(n8nClient.get).toHaveBeenCalledWith('/executions', {
+        params: { limit: 10 }
+      });
+      expect(result).toEqual(mockData);
+    });
+
+    it('should get execution by id', async () => {
+      const mockExecution = { id: 'exec1', finished: true };
+      vi.mocked(n8nClient.get).mockResolvedValue({ data: mockExecution });
+
+      const result = await service.getExecution('exec1');
+
+      expect(n8nClient.get).toHaveBeenCalledWith('/executions/exec1');
+      expect(result).toEqual(mockExecution);
+    });
+
+    it('should execute workflow', async () => {
+      const mockExecution = { id: 'exec2', workflowId: '123' };
+      vi.mocked(n8nClient.post).mockResolvedValue({ data: mockExecution });
+
+      const result = await service.executeWorkflow('123');
+
+      expect(n8nClient.post).toHaveBeenCalledWith('/workflows/123/execute');
+      expect(result).toEqual(mockExecution);
+    });
+  });
+
+  describe('Webhook Operations', () => {
+    it('should trigger webhook in production mode', async () => {
+      const mockResponse = {
+        status: 200,
+        statusText: 'OK',
+        data: { success: true },
+      };
+      vi.mocked(webhookClient.request).mockResolvedValue(mockResponse);
+
+      const result = await service.triggerWebhook({
+        path: 'test-webhook',
+        method: 'POST',
+        body: { test: 'data' },
+        testMode: false,
+      });
+
+      expect(webhookClient.request).toHaveBeenCalledWith({
+        method: 'POST',
+        url: '/webhook/test-webhook',
+        data: { test: 'data' },
+        headers: undefined,
+        params: undefined,
+        validateStatus: expect.any(Function),
+      });
+      expect(result).toEqual({
+        status: 200,
+        statusText: 'OK',
+        data: { success: true },
+      });
+    });
+
+    it('should trigger webhook in test mode', async () => {
+      const mockResponse = {
+        status: 200,
+        statusText: 'OK',
+        data: { success: true },
+      };
+      vi.mocked(webhookClient.request).mockResolvedValue(mockResponse);
+
+      await service.triggerWebhook({
+        path: 'test-webhook',
+        method: 'GET',
+        testMode: true,
+      });
+
+      expect(webhookClient.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'GET',
+          url: '/webhook-test/test-webhook',
+        })
+      );
+    });
+  });
+
+  describe('Node Types', () => {
+    it('should list node types', async () => {
+      const mockData = { data: [{ name: 'Webhook', type: 'n8n-nodes-base.webhook' }] };
+      vi.mocked(n8nClient.get).mockResolvedValue({ data: mockData });
+
+      const result = await service.listNodeTypes();
+
+      expect(n8nClient.get).toHaveBeenCalledWith('/node-types');
+      expect(result).toEqual(mockData.data);
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should handle network errors', async () => {
+      vi.mocked(n8nClient.get).mockRejectedValue(new Error('Network error'));
+
+      await expect(service.listWorkflows()).rejects.toThrow();
+    });
+
+    it('should handle API errors', async () => {
+      const axiosError = {
+        response: {
+          status: 404,
+          data: { message: 'Workflow not found' },
+        },
+        message: 'Request failed',
+      };
+      vi.mocked(n8nClient.get).mockRejectedValue(axiosError);
+
+      await expect(service.getWorkflow('999')).rejects.toThrow();
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/services/validation-service.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ValidationService } from '../../services/validation-service.js';
+import { n8nApi } from '../../services/n8n-api-service.js';
+
+// Mock n8nApi
+vi.mock('../../services/n8n-api-service.js', () => ({
+  n8nApi: {
+    listNodeTypes: vi.fn(),
+  },
+}));
+
+describe('ValidationService', () => {
+  let service: ValidationService;
+
+  beforeEach(() => {
+    service = new ValidationService();
+    vi.clearAllMocks();
+  });
+
+  describe('validateWorkflowStructure()', () => {
+    const validNode = {
+      id: 'node-1',
+      name: 'Start Node',
+      type: 'n8n-nodes-base.start',
+      position: [100, 100],
+      parameters: {},
+    };
+
+    it('should pass a valid workflow', async () => {
+      vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'n8n-nodes-base.start' }] as any);
+
+      const workflow = {
+        name: 'Valid Workflow',
+        nodes: [validNode],
+        connections: {},
+      };
+
+      const result = await service.validateWorkflowStructure(workflow);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should detect missing required fields', async () => {
+      const workflow = {
+        // missing name
+        nodes: [], // missing nodes
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.type === 'missing_field')).toBe(true);
+      expect(result.errors.some(e => e.type === 'empty_workflow')).toBe(true);
+    });
+
+    it('should detect duplicate node IDs', async () => {
+      const workflow = {
+        name: 'Duplicate IDs',
+        nodes: [
+          { ...validNode, id: 'node-1', name: 'Node 1' },
+          { ...validNode, id: 'node-1', name: 'Node 2' },
+        ],
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.type === 'duplicate_id')).toBe(true);
+    });
+
+    it('should detect duplicate node names', async () => {
+      const workflow = {
+        name: 'Duplicate Names',
+        nodes: [
+          { ...validNode, id: 'node-1', name: 'Same Name' },
+          { ...validNode, id: 'node-2', name: 'Same Name' },
+        ],
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.type === 'duplicate_name')).toBe(true);
+    });
+
+    it('should detect invalid node types', async () => {
+      vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'n8n-nodes-base.start' }] as any);
+
+      const workflow = {
+        name: 'Invalid Type',
+        nodes: [
+          { ...validNode, type: 'non-existent-type' },
+        ],
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.type === 'invalid_node_type')).toBe(true);
+    });
+
+    it('should detect invalid connections (source)', async () => {
+      const workflow = {
+        name: 'Invalid Source',
+        nodes: [validNode],
+        connections: {
+          'non-existent-node': {
+            main: [[]],
+          },
+        },
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.type === 'invalid_connection')).toBe(true);
+    });
+
+    it('should detect invalid connections (target)', async () => {
+      const workflow = {
+        name: 'Invalid Target',
+        nodes: [validNode],
+        connections: {
+          'node-1': {
+            main: [
+              [
+                { node: 'non-existent-node', type: 'main', index: 0 },
+              ],
+            ],
+          },
+        },
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.type === 'invalid_connection')).toBe(true);
+    });
+
+    it('should detect circular dependencies', async () => {
+      const workflow = {
+        name: 'Circular',
+        nodes: [
+          { ...validNode, id: 'node-1', name: 'Node 1' },
+          { ...validNode, id: 'node-2', name: 'Node 2' },
+        ],
+        connections: {
+          'node-1': {
+            main: [[{ node: 'node-2', type: 'main', index: 0 }]],
+          },
+          'node-2': {
+            main: [[{ node: 'node-1', type: 'main', index: 0 }]],
+          },
+        },
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.type === 'circular_dependency')).toBe(true);
+    });
+
+    it('should warn about missing trigger in active workflow', async () => {
+      vi.mocked(n8nApi.listNodeTypes).mockResolvedValue([{ name: 'n8n-nodes-base.set' }] as any);
+
+      const workflow = {
+        name: 'No Trigger Active',
+        active: true,
+        nodes: [{ ...validNode, type: 'n8n-nodes-base.set' }],
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.warnings.some(w => w.type === 'missing_trigger')).toBe(true);
+    });
+
+    it('should warn about disabled nodes with connections', async () => {
+      const workflow = {
+        name: 'Disabled Node',
+        nodes: [
+          { ...validNode, id: 'node-1', name: 'Node 1', disabled: true },
+          { ...validNode, id: 'node-2', name: 'Node 2' },
+        ],
+        connections: {
+          'node-1': {
+            main: [[{ node: 'node-2', type: 'main', index: 0 }]],
+          },
+        },
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.warnings.some(w => w.type === 'disabled_node')).toBe(true);
+    });
+
+    it('should warn if all nodes are disabled', async () => {
+      const workflow = {
+        name: 'All Disabled',
+        nodes: [
+          { ...validNode, id: 'node-1', disabled: true },
+          { ...validNode, id: 'node-2', disabled: true },
+        ],
+      };
+
+      const result = await service.validateWorkflowStructure(workflow as any);
+
+      expect(result.warnings.some(w => w.type === 'all_nodes_disabled')).toBe(true);
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/tools/credential-tools.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { credentialTools, handleCredentialTool } from '../../tools/credential-tools.js';
+import { credentialService } from '../../services/credential-service.js';
+
+// Mock credential service
+vi.mock('../../services/credential-service.js', () => ({
+  credentialService: {
+    getSchema: vi.fn(),
+    listCredentials: vi.fn(),
+    createCredential: vi.fn(),
+    updateCredential: vi.fn(),
+    deleteCredential: vi.fn(),
+    testCredential: vi.fn(),
+    validateCredentialData: vi.fn(),
+    getCredentialUsage: vi.fn(),
+  },
+}));
+
+// Mock credential test service
+vi.mock('../../services/credential-test-service.js', () => ({
+  credentialTestService: {
+    testCredential: vi.fn(),
+  },
+}));
+
+describe('Credential Tools', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Tool Definitions', () => {
+    it('should export 6 credential tools', () => {
+      expect(credentialTools).toHaveLength(6);
+    });
+
+    it('should have valid tool schemas', () => {
+      credentialTools.forEach(tool => {
+        expect(tool.name).toBeDefined();
+        expect(tool.description).toBeDefined();
+        expect(tool.inputSchema).toBeDefined();
+      });
+    });
+
+    it('should include all expected credential tools', () => {
+      const toolNames = credentialTools.map(t => t.name);
+      expect(toolNames).toContain('get_credential_schema');
+      expect(toolNames).toContain('list_credentials');
+      expect(toolNames).toContain('create_credential');
+      expect(toolNames).toContain('update_credential');
+      expect(toolNames).toContain('delete_credential');
+      expect(toolNames).toContain('test_credential');
+    });
+  });
+
+  describe('get_credential_schema', () => {
+    it('should get credential schema', async () => {
+      const mockSchema = {
+        type: 'githubApi',
+        displayName: 'GitHub API',
+        properties: [
+          {
+            name: 'accessToken',
+            type: 'string',
+            required: true,
+            description: 'GitHub Personal Access Token',
+          },
+        ],
+      };
+      vi.mocked(credentialService.getSchema).mockResolvedValue(mockSchema);
+
+      const result = await handleCredentialTool('get_credential_schema', {
+        credentialType: 'githubApi',
+      });
+
+      expect(credentialService.getSchema).toHaveBeenCalledWith('githubApi');
+      expect(result).toEqual(mockSchema);
+    });
+
+    it('should validate required credentialType parameter', async () => {
+      await expect(
+        handleCredentialTool('get_credential_schema', {})
+      ).rejects.toThrow('Missing required parameters: credentialType');
+    });
+  });
+
+  describe('list_credentials', () => {
+    it('should list all credentials', async () => {
+      const mockCredentials = [
+        { id: '1', name: 'GitHub Account', type: 'githubApi' },
+        { id: '2', name: 'Slack Workspace', type: 'slackApi' },
+      ];
+      vi.mocked(credentialService.listCredentials).mockResolvedValue(mockCredentials);
+
+      const result = await handleCredentialTool('list_credentials', {});
+
+      expect(credentialService.listCredentials).toHaveBeenCalledWith(undefined);
+      expect(result).toEqual(mockCredentials);
+    });
+
+    it('should filter credentials by type', async () => {
+      const mockCredentials = [
+        { id: '1', name: 'GitHub Account', type: 'githubApi' },
+      ];
+      vi.mocked(credentialService.listCredentials).mockResolvedValue(mockCredentials);
+
+      const result = await handleCredentialTool('list_credentials', {
+        type: 'githubApi',
+      });
+
+      expect(credentialService.listCredentials).toHaveBeenCalledWith('githubApi');
+      expect(result).toEqual(mockCredentials);
+    });
+  });
+
+  describe('create_credential', () => {
+    it('should create credential with validation', async () => {
+      const mockCredential = {
+        id: '123',
+        name: 'Test GitHub',
+        type: 'githubApi',
+        data: { accessToken: 'test_token' },
+      };
+      vi.mocked(credentialService.createCredential).mockResolvedValue(mockCredential);
+
+      const result = await handleCredentialTool('create_credential', {
+        name: 'Test GitHub',
+        type: 'githubApi',
+        data: { accessToken: 'test_token' },
+      });
+
+      expect(credentialService.createCredential).toHaveBeenCalledWith({
+        name: 'Test GitHub',
+        type: 'githubApi',
+        data: { accessToken: 'test_token' },
+      });
+      expect(result).toEqual(mockCredential);
+    });
+
+    it('should validate required parameters', async () => {
+      await expect(
+        handleCredentialTool('create_credential', { name: 'Test' })
+      ).rejects.toThrow('Missing required parameters');
+    });
+
+    it('should handle validation errors', async () => {
+      vi.mocked(credentialService.createCredential).mockRejectedValue(
+        new Error('Validation failed: Missing required field: accessToken')
+      );
+
+      await expect(
+        handleCredentialTool('create_credential', {
+          name: 'Incomplete',
+          type: 'githubApi',
+          data: {},
+        })
+      ).rejects.toThrow('Validation failed');
+    });
+  });
+
+  describe('update_credential', () => {
+    it('should update credential', async () => {
+      const mockUpdated = {
+        id: '123',
+        name: 'Updated GitHub',
+        type: 'githubApi',
+      };
+      vi.mocked(credentialService.updateCredential).mockResolvedValue(mockUpdated);
+
+      const result = await handleCredentialTool('update_credential', {
+        id: '123',
+        name: 'Updated GitHub',
+      });
+
+      expect(credentialService.updateCredential).toHaveBeenCalledWith('123', {
+        name: 'Updated GitHub',
+      });
+      expect(result).toEqual(mockUpdated);
+    });
+
+    it('should validate required id parameter', async () => {
+      await expect(
+        handleCredentialTool('update_credential', { name: 'Test' })
+      ).rejects.toThrow('Missing required parameters: id');
+    });
+  });
+
+  describe('delete_credential', () => {
+    it('should delete credential', async () => {
+      vi.mocked(credentialService.deleteCredential).mockResolvedValue(undefined);
+
+      const result = await handleCredentialTool('delete_credential', {
+        id: '123',
+      });
+
+      expect(credentialService.deleteCredential).toHaveBeenCalledWith('123', false);
+      expect(result).toEqual({
+        success: true,
+        message: 'Credential 123 deleted successfully',
+      });
+    });
+
+    it('should support force delete', async () => {
+      vi.mocked(credentialService.deleteCredential).mockResolvedValue(undefined);
+
+      await handleCredentialTool('delete_credential', {
+        id: '123',
+        force: true,
+      });
+
+      expect(credentialService.deleteCredential).toHaveBeenCalledWith('123', true);
+    });
+
+    it('should handle in-use credential error', async () => {
+      vi.mocked(credentialService.deleteCredential).mockRejectedValue(
+        new Error('Credential is used by 2 workflow(s): 1, 2. Use force=true to delete anyway.')
+      );
+
+      await expect(
+        handleCredentialTool('delete_credential', { id: '123' })
+      ).rejects.toThrow('Credential is used by');
+    });
+
+    it('should validate required id parameter', async () => {
+      await expect(
+        handleCredentialTool('delete_credential', {})
+      ).rejects.toThrow('Missing required parameters: id');
+    });
+  });
+
+  describe('test_credential', () => {
+    it('should test credential validity', async () => {
+      const mockTestResult = {
+        valid: true,
+        message: 'Successfully connected to githubApi',
+        testedAt: '2026-02-11T06:00:00.000Z',
+      };
+      vi.mocked(credentialService.testCredential).mockResolvedValue(mockTestResult);
+
+      const result = await handleCredentialTool('test_credential', {
+        credentialId: '123',
+      });
+
+      expect(credentialService.testCredential).toHaveBeenCalledWith('123');
+      expect(result).toEqual(mockTestResult);
+    });
+
+    it('should handle failed credential test', async () => {
+      const mockTestResult = {
+        valid: false,
+        message: 'Connection failed: Invalid token',
+        testedAt: '2026-02-11T06:00:00.000Z',
+      };
+      vi.mocked(credentialService.testCredential).mockResolvedValue(mockTestResult);
+
+      const result = await handleCredentialTool('test_credential', {
+        credentialId: '123',
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.message).toContain('failed');
+    });
+
+    it('should validate required credentialId parameter', async () => {
+      await expect(
+        handleCredentialTool('test_credential', {})
+      ).rejects.toThrow('Missing required parameters: credentialId');
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should throw error for unknown tool', async () => {
+      await expect(
+        handleCredentialTool('unknown_tool', {})
+      ).rejects.toThrow('Unknown credential tool: unknown_tool');
+    });
+
+    it('should propagate service errors', async () => {
+      vi.mocked(credentialService.getSchema).mockRejectedValue(
+        new Error('Schema not found for invalidType')
+      );
+
+      await expect(
+        handleCredentialTool('get_credential_schema', {
+          credentialType: 'invalidType',
+        })
+      ).rejects.toThrow('Schema not found');
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/tools/validation-tools.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { handleValidationTool } from '../../tools/validation-tools.js';
+import { validationService } from '../../services/validation-service.js';
+
+// Mock validationService
+vi.mock('../../services/validation-service.js', () => ({
+  validationService: {
+    validateWorkflowStructure: vi.fn(),
+  },
+}));
+
+describe('Validation Tools', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('handleValidationTool()', () => {
+    it('should call validateWorkflowStructure with correct arguments', async () => {
+      const mockWorkflow = { name: 'Test', nodes: [] };
+      const mockResult = { valid: true, errors: [], warnings: [] };
+      vi.mocked(validationService.validateWorkflowStructure).mockResolvedValue(mockResult);
+
+      const result = await handleValidationTool('validate_workflow_structure', {
+        workflow: mockWorkflow,
+      });
+
+      expect(validationService.validateWorkflowStructure).toHaveBeenCalledWith(mockWorkflow);
+      expect(result).toEqual(mockResult);
+    });
+
+    it('should throw error for missing workflow argument', async () => {
+      await expect(handleValidationTool('validate_workflow_structure', {}))
+        .rejects.toThrow('Missing required parameters: workflow');
+    });
+
+    it('should throw error for unknown tool', async () => {
+      await expect(handleValidationTool('unknown_tool', {}))
+        .rejects.toThrow('Unknown validation tool: unknown_tool');
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/tools/workflow-tools.test.ts">
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { workflowTools, handleWorkflowTool } from '../../tools/workflow-tools.js';
+import { n8nApi } from '../../services/n8n-api-service.js';
+
+// Mock config/env.ts BEFORE importing anything else
+vi.mock('../../config/env.js', () => ({
+  N8N_HOST: 'http://localhost:5678',
+  N8N_API_KEY: 'test-api-key',
+  n8nClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
+  webhookClient: {
+    request: vi.fn(),
+  },
+}));
+
+// Mock n8n API service
+vi.mock('../../services/n8n-api-service.js', () => ({
+  n8nApi: {
+    listWorkflows: vi.fn(),
+    getWorkflow: vi.fn(),
+    createWorkflow: vi.fn(),
+    updateWorkflow: vi.fn(),
+    deleteWorkflow: vi.fn(),
+    activateWorkflow: vi.fn(),
+    executeWorkflow: vi.fn(),
+    triggerWebhook: vi.fn(),
+    listExecutions: vi.fn(),
+    getExecution: vi.fn(),
+    listNodeTypes: vi.fn(),
+  },
+}));
+
+describe('Workflow Tools', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Tool Definitions', () => {
+    it('should export 11 workflow tools', () => {
+      expect(workflowTools).toHaveLength(11);
+    });
+
+    it('should have valid tool schemas', () => {
+      workflowTools.forEach(tool => {
+        expect(tool.name).toBeDefined();
+        expect(tool.description).toBeDefined();
+        expect(tool.inputSchema).toBeDefined();
+      });
+    });
+  });
+
+  describe('Workflow Management Tools', () => {
+    it('should handle list_workflows', async () => {
+      const mockResult = { data: [{ id: '1', name: 'Test' }] };
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue(mockResult);
+
+      const result = await handleWorkflowTool('list_workflows', { limit: 10 });
+
+      expect(n8nApi.listWorkflows).toHaveBeenCalledWith({ limit: 10 });
+      expect(result).toEqual(mockResult);
+    });
+
+    it('should handle get_workflow', async () => {
+      const mockWorkflow = { id: '123', name: 'Test' };
+      vi.mocked(n8nApi.getWorkflow).mockResolvedValue(mockWorkflow);
+
+      const result = await handleWorkflowTool('get_workflow', { id: '123' });
+
+      expect(n8nApi.getWorkflow).toHaveBeenCalledWith('123');
+      expect(result).toEqual(mockWorkflow);
+    });
+
+    it('should validate required params for get_workflow', async () => {
+      await expect(handleWorkflowTool('get_workflow', {})).rejects.toThrow(
+        'Missing required parameters: id'
+      );
+    });
+
+    it('should handle create_workflow', async () => {
+      const mockWorkflow = { name: 'New Workflow' };
+      const mockResult = { id: '456', ...mockWorkflow };
+      vi.mocked(n8nApi.createWorkflow).mockResolvedValue(mockResult);
+
+      const result = await handleWorkflowTool('create_workflow', mockWorkflow);
+
+      expect(n8nApi.createWorkflow).toHaveBeenCalledWith(mockWorkflow);
+      expect(result).toEqual(mockResult);
+    });
+
+    it('should handle update_workflow', async () => {
+      const mockUpdate = { id: '123', name: 'Updated' };
+      const mockResult = { id: '123', name: 'Updated' };
+      vi.mocked(n8nApi.updateWorkflow).mockResolvedValue(mockResult);
+
+      const result = await handleWorkflowTool('update_workflow', mockUpdate);
+
+      expect(n8nApi.updateWorkflow).toHaveBeenCalledWith('123', { name: 'Updated' });
+      expect(result).toEqual(mockResult);
+    });
+
+    it('should handle delete_workflow', async () => {
+      vi.mocked(n8nApi.deleteWorkflow).mockResolvedValue();
+
+      const result = await handleWorkflowTool('delete_workflow', { id: '123' });
+
+      expect(n8nApi.deleteWorkflow).toHaveBeenCalledWith('123');
+      expect(result).toEqual({
+        success: true,
+        message: 'Workflow 123 deleted',
+      });
+    });
+
+    it('should handle activate_workflow', async () => {
+      const mockResult = { id: '123', active: true };
+      vi.mocked(n8nApi.activateWorkflow).mockResolvedValue(mockResult);
+
+      const result = await handleWorkflowTool('activate_workflow', {
+        id: '123',
+        active: true,
+      });
+
+      expect(n8nApi.activateWorkflow).toHaveBeenCalledWith('123', true);
+      expect(result).toEqual(mockResult);
+    });
+  });
+
+  describe('Execution Tools', () => {
+    it('should handle execute_workflow', async () => {
+      const mockExecution = { id: 'exec1', workflowId: '123' };
+      vi.mocked(n8nApi.executeWorkflow).mockResolvedValue(mockExecution);
+
+      const result = await handleWorkflowTool('execute_workflow', { id: '123' });
+
+      expect(n8nApi.executeWorkflow).toHaveBeenCalledWith('123');
+      expect(result).toEqual(mockExecution);
+    });
+
+    it('should handle trigger_webhook', async () => {
+      const mockResult = { status: 200, data: { success: true } };
+      vi.mocked(n8nApi.triggerWebhook).mockResolvedValue(mockResult);
+
+      const result = await handleWorkflowTool('trigger_webhook', {
+        webhook_path: 'test-hook',
+        method: 'POST',
+        body: { test: 'data' },
+      });
+
+      expect(n8nApi.triggerWebhook).toHaveBeenCalledWith({
+        path: 'test-hook',
+        method: 'POST',
+        body: { test: 'data' },
+        headers: undefined,
+        queryParams: undefined,
+        testMode: undefined,
+      });
+      expect(result).toHaveProperty('url');
+    });
+
+    it('should handle list_executions', async () => {
+      const mockResult = { data: [{ id: 'exec1', finished: true }] };
+      vi.mocked(n8nApi.listExecutions).mockResolvedValue(mockResult);
+
+      const result = await handleWorkflowTool('list_executions', { limit: 10 });
+
+      expect(n8nApi.listExecutions).toHaveBeenCalledWith({ limit: 10 });
+      expect(result).toEqual(mockResult);
+    });
+
+    it('should handle get_execution', async () => {
+      const mockExecution = { id: 'exec1', finished: true };
+      vi.mocked(n8nApi.getExecution).mockResolvedValue(mockExecution);
+
+      const result = await handleWorkflowTool('get_execution', { id: 'exec1' });
+
+      expect(n8nApi.getExecution).toHaveBeenCalledWith('exec1');
+      expect(result).toEqual(mockExecution);
+    });
+  });
+
+  describe('Discovery Tools', () => {
+    it('should handle list_node_types', async () => {
+      const mockTypes = [{ name: 'Webhook', type: 'n8n-nodes-base.webhook' }];
+      vi.mocked(n8nApi.listNodeTypes).mockResolvedValue(mockTypes);
+
+      const result = await handleWorkflowTool('list_node_types', {});
+
+      expect(n8nApi.listNodeTypes).toHaveBeenCalled();
+      expect(result).toEqual(mockTypes);
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should throw on unknown tool', async () => {
+      await expect(
+        handleWorkflowTool('unknown_tool', {})
+      ).rejects.toThrow('Unknown workflow tool: unknown_tool');
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/utils/expression-validator.test.ts">
+import { describe, it, expect } from 'vitest';
+import { extractExpressions, validateExpression } from '../../utils/expression-validator.js';
+
+describe('Expression Validator', () => {
+  describe('extractExpressions()', () => {
+    it('should extract single expression from string', () => {
+      const result = extractExpressions('Hello {{ $json.name }}');
+      expect(result).toEqual(['$json.name']);
+    });
+
+    it('should extract multiple expressions from string', () => {
+      const result = extractExpressions('{{ $json.first }} {{ $json.last }}');
+      expect(result).toEqual(['$json.first', '$json.last']);
+    });
+
+    it('should return empty array if no expressions found', () => {
+      const result = extractExpressions('No expressions here');
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array for non-string input', () => {
+      expect(extractExpressions(null)).toEqual([]);
+      expect(extractExpressions(undefined)).toEqual([]);
+      expect(extractExpressions(123)).toEqual([]);
+      expect(extractExpressions({})).toEqual([]);
+    });
+
+    it('should trim extracted expressions', () => {
+      const result = extractExpressions('{{  $json.name  }}');
+      expect(result).toEqual(['$json.name']);
+    });
+
+    it('should handle complex expressions', () => {
+      const result = extractExpressions('Value is {{ $json.amount > 10 ? \"high\" : \"low\" }}');
+      expect(result).toEqual(['$json.amount > 10 ? \"high\" : \"low\"']);
+    });
+  });
+
+  describe('validateExpression()', () => {
+    it('should validate balanced parentheses', () => {
+      expect(validateExpression('(1 + 2) * 3').valid).toBe(true);
+      expect(validateExpression('((1 + 2))').valid).toBe(true);
+    });
+
+    it('should fail on unbalanced parentheses', () => {
+      const result1 = validateExpression('(1 + 2');
+      expect(result1.valid).toBe(false);
+      expect(result1.error).toBe('Unbalanced parentheses');
+
+      const result2 = validateExpression('1 + 2)');
+      expect(result2.valid).toBe(false);
+      expect(result2.error).toBe('Unbalanced parentheses');
+
+      const result3 = validateExpression(')(');
+      expect(result3.valid).toBe(false);
+      expect(result3.error).toBe('Unbalanced parentheses');
+    });
+
+    it('should validate common n8n variables', () => {
+      const variables = [
+        '$json', '$node', '$vars', '$parameter', '$now',
+        '$today', '$workflow', '$execution', '$input', '$binary'
+      ];
+
+      for (const v of variables) {
+        expect(validateExpression(`${v}.property`).valid).toBe(true);
+      }
+    });
+
+    it('should fail on invalid variable references', () => {
+      const result = validateExpression('$invalid.property');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Invalid variable reference');
+    });
+
+    it('should allow expressions without variables', () => {
+      expect(validateExpression('1 + 1').valid).toBe(true);
+      expect(validateExpression('\"hello\".toUpperCase()').valid).toBe(true);
+    });
+
+    it('should handle nested expressions in validation (as plain string)', () => {
+      // Expression validator expects string without {{ }}
+      expect(validateExpression('Math.floor(1.5)').valid).toBe(true);
+    });
+  });
+});
+</file>
+
+<file path="src/__tests__/utils/workflow-graph-analyzer.test.ts">
+import { describe, it, expect } from 'vitest';
+import {
+  detectCircularDependencies,
+  validateConnections,
+} from '../../utils/workflow-graph-analyzer.js';
+import type { N8nNode } from '../../types/n8n-types.js';
+
+describe('detectCircularDependencies', () => {
+  const createNode = (id: string): N8nNode => ({
+    id,
+    name: `Node ${id}`,
+    type: 'n8n-nodes-base.set',
+    typeVersion: 1,
+    position: [0, 0],
+    parameters: {},
+  });
+
+  it('should return false for workflow without cycles', () => {
+    const nodes = [createNode('1'), createNode('2'), createNode('3')];
+    const connections = {
+      '1': { main: [[{ node: '2', type: 'main', index: 0 }]] },
+      '2': { main: [[{ node: '3', type: 'main', index: 0 }]] },
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(false);
+  });
+
+  it('should detect simple circular dependency (A→B→A)', () => {
+    const nodes = [createNode('1'), createNode('2')];
+    const connections = {
+      '1': { main: [[{ node: '2', type: 'main', index: 0 }]] },
+      '2': { main: [[{ node: '1', type: 'main', index: 0 }]] },
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(true);
+  });
+
+  it('should detect self-loop (node connects to itself)', () => {
+    const nodes = [createNode('1')];
+    const connections = {
+      '1': { main: [[{ node: '1', type: 'main', index: 0 }]] },
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(true);
+  });
+
+  it('should detect complex multi-path cycle (A→B→C→A)', () => {
+    const nodes = [createNode('A'), createNode('B'), createNode('C')];
+    const connections = {
+      A: { main: [[{ node: 'B', type: 'main', index: 0 }]] },
+      B: { main: [[{ node: 'C', type: 'main', index: 0 }]] },
+      C: { main: [[{ node: 'A', type: 'main', index: 0 }]] },
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(true);
+  });
+
+  it('should detect cycle with multiple entry points', () => {
+    const nodes = [
+      createNode('1'),
+      createNode('2'),
+      createNode('3'),
+      createNode('4'),
+    ];
+    const connections = {
+      '1': { main: [[{ node: '3', type: 'main', index: 0 }]] },
+      '2': { main: [[{ node: '3', type: 'main', index: 0 }]] },
+      '3': { main: [[{ node: '4', type: 'main', index: 0 }]] },
+      '4': { main: [[{ node: '3', type: 'main', index: 0 }]] }, // Cycle: 3→4→3
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(true);
+  });
+
+  it('should handle empty connections object', () => {
+    const nodes = [createNode('1'), createNode('2')];
+    const connections = {};
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(false);
+  });
+
+  it('should handle disconnected graph components', () => {
+    const nodes = [
+      createNode('1'),
+      createNode('2'),
+      createNode('3'),
+      createNode('4'),
+    ];
+    const connections = {
+      '1': { main: [[{ node: '2', type: 'main', index: 0 }]] },
+      '3': { main: [[{ node: '4', type: 'main', index: 0 }]] },
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(false);
+  });
+
+  it('should handle nodes with multiple outputs', () => {
+    const nodes = [createNode('1'), createNode('2'), createNode('3')];
+    const connections = {
+      '1': {
+        main: [
+          [
+            { node: '2', type: 'main', index: 0 },
+            { node: '3', type: 'main', index: 0 },
+          ],
+        ],
+      },
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(false);
+  });
+
+  it('should throw error when exceeding max depth', () => {
+    // Create a deep chain exceeding maxDepth
+    const maxDepth = 5;
+    const nodes = Array.from({ length: 10 }, (_, i) => createNode(`${i}`));
+    const connections: Record<string, any> = {};
+
+    // Create linear chain: 0→1→2→3→...→9
+    for (let i = 0; i < 9; i++) {
+      connections[`${i}`] = {
+        main: [[{ node: `${i + 1}`, type: 'main', index: 0 }]],
+      };
+    }
+
+    expect(() => detectCircularDependencies(nodes, connections, maxDepth)).toThrow(
+      'Maximum graph depth'
+    );
+  });
+
+  it('should handle invalid connection structure gracefully', () => {
+    const nodes = [createNode('1'), createNode('2')];
+    const connections = {
+      '1': { main: [[{ node: null }]] }, // Invalid connection
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(false);
+  });
+
+  it('should handle diamond-shaped graph without cycle', () => {
+    const nodes = [
+      createNode('1'),
+      createNode('2'),
+      createNode('3'),
+      createNode('4'),
+    ];
+    const connections = {
+      '1': {
+        main: [
+          [
+            { node: '2', type: 'main', index: 0 },
+            { node: '3', type: 'main', index: 0 },
+          ],
+        ],
+      },
+      '2': { main: [[{ node: '4', type: 'main', index: 0 }]] },
+      '3': { main: [[{ node: '4', type: 'main', index: 0 }]] },
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(false);
+  });
+
+  it('should detect cycle in complex graph with branches', () => {
+    const nodes = [
+      createNode('A'),
+      createNode('B'),
+      createNode('C'),
+      createNode('D'),
+      createNode('E'),
+    ];
+    const connections = {
+      A: { main: [[{ node: 'B', type: 'main', index: 0 }]] },
+      B: {
+        main: [
+          [
+            { node: 'C', type: 'main', index: 0 },
+            { node: 'D', type: 'main', index: 0 },
+          ],
+        ],
+      },
+      C: { main: [[{ node: 'E', type: 'main', index: 0 }]] },
+      D: { main: [[{ node: 'E', type: 'main', index: 0 }]] },
+      E: { main: [[{ node: 'B', type: 'main', index: 0 }]] }, // Cycle: B→...→E→B
+    };
+
+    expect(detectCircularDependencies(nodes, connections)).toBe(true);
+  });
+});
+
+describe('validateConnections', () => {
+  it('should return empty array for valid connections', () => {
+    const nodeIds = new Set(['1', '2', '3']);
+    const connections = {
+      '1': { main: [[{ node: '2', type: 'main', index: 0 }]] },
+      '2': { main: [[{ node: '3', type: 'main', index: 0 }]] },
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('should detect non-existent source node', () => {
+    const nodeIds = new Set(['1', '2']);
+    const connections = {
+      '999': { main: [[{ node: '2', type: 'main', index: 0 }]] },
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].sourceId).toBe('999');
+    expect(errors[0].message).toContain('non-existent source node');
+  });
+
+  it('should detect non-existent target node', () => {
+    const nodeIds = new Set(['1', '2']);
+    const connections = {
+      '1': { main: [[{ node: '999', type: 'main', index: 0 }]] },
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].targetId).toBe('999');
+    expect(errors[0].message).toContain('non-existent target node');
+  });
+
+  it('should handle null/undefined connections', () => {
+    const nodeIds = new Set(['1']);
+    const errors = validateConnections(null as any, nodeIds);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('should detect invalid connection structure', () => {
+    const nodeIds = new Set(['1']);
+    const connections = {
+      '1': 'invalid', // Should be object
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('Invalid connection structure');
+  });
+
+  it('should handle connections with multiple outputs', () => {
+    const nodeIds = new Set(['1', '2', '3']);
+    const connections = {
+      '1': {
+        main: [
+          [
+            { node: '2', type: 'main', index: 0 },
+            { node: '3', type: 'main', index: 0 },
+          ],
+        ],
+      },
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('should detect multiple invalid targets', () => {
+    const nodeIds = new Set(['1']);
+    const connections = {
+      '1': {
+        main: [
+          [
+            { node: '999', type: 'main', index: 0 },
+            { node: '888', type: 'main', index: 0 },
+          ],
+        ],
+      },
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(2);
+    expect(errors[0].targetId).toBe('999');
+    expect(errors[1].targetId).toBe('888');
+  });
+
+  it('should handle empty connections object', () => {
+    const nodeIds = new Set(['1', '2']);
+    const connections = {};
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('should detect invalid connection entries', () => {
+    const nodeIds = new Set(['1', '2']);
+    const connections = {
+      '1': {
+        main: [[{ node: null }, { node: '2', type: 'main', index: 0 }]],
+      },
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(1); // Should report invalid structure
+    expect(errors[0].message).toContain('Invalid connection structure');
+  });
+
+  it('should validate complex nested connection structure', () => {
+    const nodeIds = new Set(['1', '2', '3', '4']);
+    const connections = {
+      '1': {
+        main: [
+          [{ node: '2', type: 'main', index: 0 }],
+          [{ node: '3', type: 'main', index: 0 }],
+        ],
+        ai: [[{ node: '4', type: 'ai', index: 0 }]],
+      },
+    };
+
+    const errors = validateConnections(connections, nodeIds);
+    expect(errors).toHaveLength(0);
+  });
+});
+</file>
+
+<file path="src/__tests__/setup.ts">
+import { beforeAll, afterAll } from 'vitest';
+
+beforeAll(() => {
+  // Setup test environment variables
+  process.env.N8N_HOST = 'http://localhost:5678';
+  process.env.N8N_API_KEY = 'test-api-key';
+});
+
+afterAll(() => {
+  // Cleanup
+});
+</file>
+
+<file path="src/services/credential-service.ts">
+import { n8nApi } from './n8n-api-service.js';
+import { credentialTestService } from './credential-test-service.js';
+import { handleApiError } from '../utils/error-handler.js';
+import type { N8nCredential, N8nCredentialSchema } from '../types/n8n-types.js';
+
+/**
+ * Service class for n8n credential management
+ * Handles credential CRUD, validation, testing, and usage tracking
+ */
+export class CredentialService {
+  /**
+   * Get schema for credential type
+   * @throws McpError if credential type not found
+   */
+  async getSchema(credentialType: string): Promise<N8nCredentialSchema> {
+    try {
+      return await n8nApi.getCredentialSchema(credentialType);
+    } catch (error) {
+      throw handleApiError(error, `Schema not found for ${credentialType}`);
+    }
+  }
+
+  /**
+   * List credentials - HYBRID APPROACH
+   * 1. Parse from workflows (primary)
+   * 2. Fallback to psql if available
+   * 3. Deduplicate and return
+   */
+  async listCredentials(type?: string): Promise<N8nCredential[]> {
+    const credentials = new Map<string, N8nCredential>();
+
+    // Method 1: Parse from workflows
+    const credentialsFromWorkflows = await this.listFromWorkflows();
+    credentialsFromWorkflows.forEach(cred => {
+      credentials.set(cred.id!, cred);
+    });
+
+    // Method 2: Fallback to psql (if database accessible)
+    try {
+      const credentialsFromDb = await this.listFromDatabase();
+      credentialsFromDb.forEach(cred => {
+        credentials.set(cred.id!, cred);
+      });
+    } catch (error) {
+      // Database not accessible, use workflow data only
+      console.warn('Database query failed, using workflow data only');
+    }
+
+    // Filter by type if specified
+    let result = Array.from(credentials.values());
+    if (type) {
+      result = result.filter(cred => cred.type === type);
+    }
+
+    return result;
+  }
+
+  /**
+   * Parse credentials from all workflows
+   * @private
+   */
+  private async listFromWorkflows(): Promise<N8nCredential[]> {
+    const workflows = await n8nApi.listWorkflows({});
+    const credentialMap = new Map<string, N8nCredential>();
+
+    for (const workflow of workflows.data) {
+      if (!workflow.nodes) continue;
+
+      for (const node of workflow.nodes) {
+        if (!node.credentials) continue;
+
+        // Extract credential references
+        for (const [credType, credData] of Object.entries(node.credentials)) {
+          const credId = (credData as any).id;
+          const credName = (credData as any).name;
+
+          if (credId && !credentialMap.has(credId)) {
+            credentialMap.set(credId, {
+              id: credId,
+              name: credName || 'Unknown',
+              type: credType,
+            });
+          }
+        }
+      }
+    }
+
+    return Array.from(credentialMap.values());
+  }
+
+  /**
+   * Query credentials from PostgreSQL database (fallback)
+   * Requires psql command and proper permissions
+   * @private
+   */
+  private async listFromDatabase(): Promise<N8nCredential[]> {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    const dbHost = process.env.DB_POSTGRESDB_HOST || 'localhost';
+    const dbPort = process.env.DB_POSTGRESDB_PORT || '5432';
+    const dbName = process.env.DB_POSTGRESDB_DATABASE || 'n8n';
+    const dbUser = process.env.DB_POSTGRESDB_USER || 'n8n';
+    const dbPassword = process.env.DB_POSTGRESDB_PASSWORD || '';
+
+    const query = `SELECT id, name, type FROM credentials_entity;`;
+    const command = `PGPASSWORD="${dbPassword}" psql -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -t -A -F"," -c "${query}"`;
+
+    const { stdout } = await execAsync(command);
+
+    // Parse CSV output
+    const lines = stdout.trim().split('\n').filter(line => line);
+    return lines.map(line => {
+      const [id, name, type] = line.split(',');
+      return { id, name, type };
+    });
+  }
+
+  /**
+   * Validate credential data against schema
+   */
+  async validateCredentialData(
+    type: string,
+    data: Record<string, any>
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const schema = await this.getSchema(type);
+    const errors: string[] = [];
+
+    // Check required fields
+    for (const prop of schema.properties) {
+      if (prop.required && !data[prop.name]) {
+        errors.push(`Missing required field: ${prop.name}`);
+      }
+    }
+
+    // Check field types (basic validation)
+    for (const [key, value] of Object.entries(data)) {
+      const prop = schema.properties.find(p => p.name === key);
+      if (!prop) continue;
+
+      if (prop.type === 'string' && typeof value !== 'string') {
+        errors.push(`Field ${key} must be a string`);
+      } else if (prop.type === 'number' && typeof value !== 'number') {
+        errors.push(`Field ${key} must be a number`);
+      } else if (prop.type === 'boolean' && typeof value !== 'boolean') {
+        errors.push(`Field ${key} must be a boolean`);
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+    };
+  }
+
+  /**
+   * Create credential with validation
+   * Warns if duplicate name exists (n8n allows duplicates)
+   */
+  async createCredential(credential: N8nCredential): Promise<N8nCredential> {
+    // Validate data against schema
+    const validation = await this.validateCredentialData(
+      credential.type,
+      credential.data || {}
+    );
+
+    if (!validation.valid) {
+      throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
+    }
+
+    // Check for duplicate names (warning only)
+    const existing = await this.listCredentials();
+    const duplicate = existing.find(c => c.name === credential.name);
+    if (duplicate) {
+      console.warn(
+        `Warning: Credential name "${credential.name}" already exists (ID: ${duplicate.id})`
+      );
+    }
+
+    // Create via API
+    return await n8nApi.createCredential(credential);
+  }
+
+  /**
+   * Update existing credential
+   */
+  async updateCredential(id: string, updates: Partial<N8nCredential>): Promise<N8nCredential> {
+    return await n8nApi.updateCredential(id, updates);
+  }
+
+  /**
+   * Find all workflows using a specific credential
+   * Used for safety checks before deletion
+   */
+  async getCredentialUsage(credentialId: string): Promise<string[]> {
+    const workflows = await n8nApi.listWorkflows({});
+    const usedBy: string[] = [];
+
+    for (const workflow of workflows.data) {
+      if (!workflow.nodes) continue;
+
+      for (const node of workflow.nodes) {
+        if (!node.credentials) continue;
+
+        for (const credData of Object.values(node.credentials)) {
+          if ((credData as any).id === credentialId) {
+            usedBy.push(workflow.id!);
+            break;
+          }
+        }
+      }
+    }
+
+    return usedBy;
+  }
+
+  /**
+   * Delete credential with safety checks
+   * @param id Credential ID
+   * @param force Skip in-use check
+   */
+  async deleteCredential(id: string, force: boolean = false): Promise<void> {
+    if (!force) {
+      const usedBy = await this.getCredentialUsage(id);
+      if (usedBy.length > 0) {
+        throw new Error(
+          `Credential is used by ${usedBy.length} workflow(s): ${usedBy.join(', ')}. ` +
+          `Use force=true to delete anyway.`
+        );
+      }
+    }
+
+    await n8nApi.deleteCredential(id);
+  }
+
+  /**
+   * Test credential validity
+   * Delegates to credential-test-service
+   */
+  async testCredential(credentialId: string): Promise<{
+    valid: boolean;
+    message: string;
+    testedAt: string;
+  }> {
+    // Get credential info to pass to test service
+    const credentials = await this.listCredentials();
+    const credential = credentials.find(c => c.id === credentialId);
+
+    if (!credential) {
+      throw new Error(`Credential ${credentialId} not found`);
+    }
+
+    return await credentialTestService.testCredential(credentialId, credential);
+  }
+}
+
+// Export singleton instance
+export const credentialService = new CredentialService();
+</file>
+
+<file path="src/services/credential-test-service.ts">
+import { n8nApi } from './n8n-api-service.js';
+import { handleApiError } from '../utils/error-handler.js';
+import type { N8nCredential } from '../types/n8n-types.js';
+
+/**
+ * Service for testing credential validity
+ * Creates temporary workflows to validate credential connections
+ */
+export class CredentialTestService {
+  /**
+   * Test credential validity by creating and executing a temporary workflow
+   * Heavy operation - use sparingly
+   *
+   * @param credentialId Credential ID to test
+   * @returns Test result with validity status and message
+   */
+  async testCredential(
+    credentialId: string,
+    credential: N8nCredential
+  ): Promise<{
+    valid: boolean;
+    message: string;
+    testedAt: string;
+  }> {
+    const testWorkflowName = `__test_credential_${credentialId}_${Date.now()}`;
+
+    try {
+      // Create minimal test workflow based on credential type
+      const testWorkflow = this.createTestWorkflow(testWorkflowName, credential);
+      const createdWorkflow = await n8nApi.createWorkflow(testWorkflow);
+
+      // Execute workflow with retry mechanism
+      const execution = await this.executeWithRetry(createdWorkflow.id!, 3);
+
+      // Check execution result
+      const success = execution.finished && !execution.data?.resultData?.error;
+
+      // Cleanup: delete test workflow
+      await n8nApi.deleteWorkflow(createdWorkflow.id!);
+
+      return {
+        valid: success,
+        message: success
+          ? `Successfully connected to ${credential.type}`
+          : `Connection failed: ${execution.data?.resultData?.error?.message || 'Unknown error'}`,
+        testedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      // Cleanup on error
+      await this.cleanupTestWorkflow(testWorkflowName);
+      throw handleApiError(error, 'Credential test failed');
+    }
+  }
+
+  /**
+   * Execute workflow with exponential backoff retry
+   * @private
+   */
+  private async executeWithRetry(
+    workflowId: string,
+    maxRetries: number
+  ): Promise<any> {
+    let lastError: Error | undefined;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const execution = await n8nApi.executeWorkflow(workflowId);
+
+        // Wait a bit for execution to complete
+        await this.sleep(2000 * (i + 1));
+
+        // Fetch execution result
+        return await n8nApi.getExecution(execution.id);
+      } catch (error) {
+        lastError = error as Error;
+        if (i < maxRetries - 1) {
+          // Exponential backoff: 1s, 2s, 4s
+          await this.sleep(1000 * Math.pow(2, i));
+        }
+      }
+    }
+
+    throw lastError || new Error('Execution failed after retries');
+  }
+
+  /**
+   * Sleep utility for async delays
+   * @private
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Create appropriate test workflow based on credential type
+   * Maps credential types to minimal test configurations
+   * @private
+   */
+  private createTestWorkflow(name: string, credential: N8nCredential): any {
+    // Map credential types to minimal test workflows
+    const testConfigs: Record<string, any> = {
+      githubApi: {
+        nodeType: 'n8n-nodes-base.github',
+        operation: 'user:get',
+        parameters: {
+          resource: 'user',
+          operation: 'get',
+        },
+      },
+      slackApi: {
+        nodeType: 'n8n-nodes-base.slack',
+        operation: 'user:info',
+        parameters: {
+          resource: 'user',
+          operation: 'info',
+          user: '@me',
+        },
+      },
+      googleSheetsOAuth2Api: {
+        nodeType: 'n8n-nodes-base.googleSheets',
+        operation: 'spreadsheet:get',
+        parameters: {
+          resource: 'spreadsheet',
+          operation: 'get',
+        },
+      },
+      // Default: HTTP Request node for generic testing
+    };
+
+    const config = testConfigs[credential.type] || {
+      nodeType: 'n8n-nodes-base.httpRequest',
+      operation: 'get',
+      parameters: {
+        method: 'GET',
+        url: 'https://httpbin.org/get',
+      },
+    };
+
+    return {
+      name,
+      active: false,
+      nodes: [
+        {
+          id: 'test-node',
+          name: 'Test Node',
+          type: config.nodeType,
+          typeVersion: 1,
+          position: [250, 300],
+          parameters: config.parameters || {},
+          credentials: {
+            [credential.type]: {
+              id: credential.id,
+              name: credential.name,
+            },
+          },
+        },
+      ],
+      connections: {},
+    };
+  }
+
+  /**
+   * Cleanup test workflow if it still exists
+   * @private
+   */
+  private async cleanupTestWorkflow(testWorkflowName: string): Promise<void> {
+    try {
+      const workflows = await n8nApi.listWorkflows({});
+      const testWf = workflows.data.find(w => w.name === testWorkflowName);
+      if (testWf) {
+        await n8nApi.deleteWorkflow(testWf.id!);
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
+
+// Export singleton instance
+export const credentialTestService = new CredentialTestService();
+</file>
+
+<file path="src/services/n8n-api-service.ts">
+import { n8nClient, webhookClient } from '../config/env.js';
+import { handleApiError } from '../utils/error-handler.js';
+import type {
+  N8nWorkflow,
+  N8nExecution,
+  N8nCredential,
+  N8nCredentialSchema
+} from '../types/n8n-types.js';
+
+/**
+ * Service class wrapping n8n REST API v1
+ * Handles all HTTP communication with n8n instance
+ */
+export class N8nApiService {
+  // ===== WORKFLOW OPERATIONS =====
+
+  async listWorkflows(params?: {
+    active?: boolean;
+    limit?: number;
+    tags?: string;
+  }): Promise<{ data: N8nWorkflow[] }> {
+    try {
+      const response = await n8nClient.get('/workflows', { params });
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, 'Failed to list workflows');
+    }
+  }
+
+  async getWorkflow(id: string): Promise<N8nWorkflow> {
+    try {
+      const response = await n8nClient.get(`/workflows/${id}`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, `Failed to get workflow ${id}`);
+    }
+  }
+
+  async createWorkflow(workflow: Partial<N8nWorkflow>): Promise<N8nWorkflow> {
+    try {
+      const response = await n8nClient.post('/workflows', workflow);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, 'Failed to create workflow');
+    }
+  }
+
+  async updateWorkflow(id: string, workflow: Partial<N8nWorkflow>): Promise<N8nWorkflow> {
+    try {
+      const response = await n8nClient.put(`/workflows/${id}`, workflow);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, `Failed to update workflow ${id}`);
+    }
+  }
+
+  async deleteWorkflow(id: string): Promise<void> {
+    try {
+      await n8nClient.delete(`/workflows/${id}`);
+    } catch (error) {
+      throw handleApiError(error, `Failed to delete workflow ${id}`);
+    }
+  }
+
+  async activateWorkflow(id: string, active: boolean): Promise<N8nWorkflow> {
+    try {
+      const endpoint = active ? 'activate' : 'deactivate';
+      const response = await n8nClient.post(`/workflows/${id}/${endpoint}`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, `Failed to ${active ? 'activate' : 'deactivate'} workflow ${id}`);
+    }
+  }
+
+  // ===== EXECUTION OPERATIONS =====
+
+  async listExecutions(params?: {
+    workflowId?: string;
+    status?: string;
+    limit?: number;
+    includeData?: boolean;
+  }): Promise<{ data: N8nExecution[] }> {
+    try {
+      const response = await n8nClient.get('/executions', { params });
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, 'Failed to list executions');
+    }
+  }
+
+  async getExecution(id: string): Promise<N8nExecution> {
+    try {
+      const response = await n8nClient.get(`/executions/${id}`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, `Failed to get execution ${id}`);
+    }
+  }
+
+  async executeWorkflow(id: string): Promise<N8nExecution> {
+    try {
+      const response = await n8nClient.post(`/workflows/${id}/execute`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, `Failed to execute workflow ${id}`);
+    }
+  }
+
+  // ===== WEBHOOK OPERATIONS =====
+
+  async triggerWebhook(params: {
+    path: string;
+    method: string;
+    body?: any;
+    headers?: Record<string, string>;
+    queryParams?: Record<string, string>;
+    testMode?: boolean;
+  }): Promise<any> {
+    try {
+      const endpoint = params.testMode
+        ? `/webhook-test/${params.path}`
+        : `/webhook/${params.path}`;
+
+      const response = await webhookClient.request({
+        method: params.method,
+        url: endpoint,
+        data: params.body,
+        headers: params.headers,
+        params: params.queryParams,
+        validateStatus: () => true, // Don't throw on any status
+      });
+
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        data: response.data,
+      };
+    } catch (error) {
+      throw handleApiError(error, 'Failed to trigger webhook');
+    }
+  }
+
+  // ===== NODE TYPES =====
+
+  async listNodeTypes(): Promise<any[]> {
+    try {
+      const response = await n8nClient.get('/node-types');
+      return response.data.data || response.data;
+    } catch (error) {
+      throw handleApiError(error, 'Failed to list node types');
+    }
+  }
+
+  // ===== CREDENTIALS (Phase 1 will extend) =====
+
+  async getCredentialSchema(credentialType: string): Promise<N8nCredentialSchema> {
+    try {
+      const response = await n8nClient.get(`/credentials/schema/${credentialType}`);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, `Failed to get schema for ${credentialType}`);
+    }
+  }
+
+  async createCredential(credential: N8nCredential): Promise<N8nCredential> {
+    try {
+      const response = await n8nClient.post('/credentials', credential);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, 'Failed to create credential');
+    }
+  }
+
+  async updateCredential(id: string, credential: Partial<N8nCredential>): Promise<N8nCredential> {
+    try {
+      const response = await n8nClient.put(`/credentials/${id}`, credential);
+      return response.data;
+    } catch (error) {
+      throw handleApiError(error, `Failed to update credential ${id}`);
+    }
+  }
+
+  async deleteCredential(id: string): Promise<void> {
+    try {
+      await n8nClient.delete(`/credentials/${id}`);
+    } catch (error) {
+      throw handleApiError(error, `Failed to delete credential ${id}`);
+    }
+  }
+}
+
+// Export singleton instance
+export const n8nApi = new N8nApiService();
+</file>
+
+<file path="src/services/validation-service.ts">
+import { n8nApi } from './n8n-api-service.js';
+import type { N8nWorkflow, N8nNode } from '../types/n8n-types.js';
+import { detectCircularDependencies, validateConnections } from '../utils/workflow-graph-analyzer.js';
+
+interface ValidationError {
+  type: string;
+  message: string;
+  severity: 'error' | 'warning';
+  nodeId?: string;
+  nodeIds?: string[];
+}
+
+interface ValidationResult {
+  valid: boolean;
+  errors: ValidationError[];
+  warnings: ValidationError[];
+}
+
+/**
+ * Service for validating workflow structures before deployment
+ * Catches errors early to prevent broken workflows
+ */
+export class ValidationService {
+  /**
+   * Validate workflow structure with comprehensive checks
+   *
+   * Performs 8 validation checks:
+   * 1. Required fields (name, nodes)
+   * 2. Node ID uniqueness
+   * 3. Node name uniqueness (n8n requirement)
+   * 4. Node types validity (via list_node_types)
+   * 5. Connections reference valid node IDs
+   * 6. Trigger node check (for active workflows)
+   * 7. Circular dependencies (DAG validation)
+   * 8. Disabled nodes with connections (warning)
+   *
+   * @param workflow - Workflow object to validate
+   * @returns Validation result with errors and warnings
+   */
+  async validateWorkflowStructure(workflow: Partial<N8nWorkflow>): Promise<ValidationResult> {
+    const errors: ValidationError[] = [];
+    const warnings: ValidationError[] = [];
+
+    // 1. Required fields check
+    if (!workflow.name) {
+      errors.push({
+        type: 'missing_field',
+        message: 'Workflow name is required',
+        severity: 'error',
+      });
+    }
+
+    if (!workflow.nodes || workflow.nodes.length === 0) {
+      errors.push({
+        type: 'empty_workflow',
+        message: 'Workflow must have at least one node',
+        severity: 'error',
+      });
+      return { valid: false, errors, warnings };
+    }
+
+    // 2. Node ID uniqueness
+    const nodeIds = new Set<string>();
+    const duplicateIds: string[] = [];
+    for (const node of workflow.nodes) {
+      if (nodeIds.has(node.id)) {
+        duplicateIds.push(node.id);
+      }
+      nodeIds.add(node.id);
+    }
+    if (duplicateIds.length > 0) {
+      errors.push({
+        type: 'duplicate_id',
+        message: `Duplicate node IDs found: ${duplicateIds.join(', ')}`,
+        severity: 'error',
+      });
+    }
+
+    // 3. Node name uniqueness (n8n requirement)
+    const nodeNames = new Map<string, string[]>();
+    for (const node of workflow.nodes) {
+      if (!nodeNames.has(node.name)) {
+        nodeNames.set(node.name, []);
+      }
+      nodeNames.get(node.name)!.push(node.id);
+    }
+
+    for (const [name, ids] of nodeNames.entries()) {
+      if (ids.length > 1) {
+        errors.push({
+          type: 'duplicate_name',
+          message: `Node name '${name}' is duplicated`,
+          nodeIds: ids,
+          severity: 'error',
+        });
+      }
+    }
+
+    // 4. Node types validation
+    try {
+      const nodeTypes = await n8nApi.listNodeTypes();
+      const validTypes = new Set(nodeTypes.map((t: any) => t.name));
+
+      for (const node of workflow.nodes) {
+        if (!validTypes.has(node.type)) {
+          errors.push({
+            type: 'invalid_node_type',
+            message: `Node type '${node.type}' not found on this n8n instance`,
+            nodeId: node.id,
+            severity: 'error',
+          });
+        }
+      }
+    } catch (error) {
+      warnings.push({
+        type: 'node_types_check_failed',
+        message: 'Could not validate node types (n8n API unavailable)',
+        severity: 'warning',
+      });
+    }
+
+    // 5. Connections validation
+    if (workflow.connections) {
+      const connectionErrors = validateConnections(workflow.connections, nodeIds);
+      errors.push(...connectionErrors.map(err => ({
+        type: 'invalid_connection',
+        message: err.message,
+        severity: 'error' as const,
+        nodeId: err.sourceId,
+      })));
+    }
+
+    // 6. Trigger node check (for active workflows)
+    const hasTrigger = workflow.nodes.some((node: N8nNode) =>
+      node.type.toLowerCase().includes('trigger') ||
+      node.type.toLowerCase().includes('webhook')
+    );
+
+    if (!hasTrigger && workflow.active) {
+      warnings.push({
+        type: 'missing_trigger',
+        message: 'Workflow needs at least one trigger node to be activated',
+        severity: 'warning',
+      });
+    }
+
+    // 7. Circular dependency check (basic DAG validation)
+    try {
+      const circular = detectCircularDependencies(workflow.nodes, workflow.connections || {});
+      if (circular) {
+        errors.push({
+          type: 'circular_dependency',
+          message: 'Circular dependency detected in workflow connections',
+          severity: 'error',
+        });
+      }
+    } catch (error) {
+      errors.push({
+        type: 'graph_too_deep',
+        message: error instanceof Error ? error.message : 'Graph analysis failed',
+        severity: 'error',
+      });
+    }
+
+    // 8. Disabled nodes with connections (warning)
+    for (const node of workflow.nodes) {
+      if (node.disabled && workflow.connections?.[node.id]) {
+        warnings.push({
+          type: 'disabled_node',
+          message: `Node '${node.name}' is disabled but has connections`,
+          nodeId: node.id,
+          severity: 'warning',
+        });
+      }
+    }
+
+    // Check if all nodes are disabled
+    const allDisabled = workflow.nodes.every((node: N8nNode) => node.disabled);
+    if (allDisabled && workflow.nodes.length > 0) {
+      warnings.push({
+        type: 'all_nodes_disabled',
+        message: 'All nodes are disabled - workflow won\'t execute',
+        severity: 'warning',
+      });
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+    };
+  }
+}
+
+// Export singleton instance
+export const validationService = new ValidationService();
+</file>
+
+<file path="src/tools/credential-tools.ts">
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { credentialService } from '../services/credential-service.js';
+import { validateRequired } from '../utils/error-handler.js';
+
+/**
+ * Define all 6 credential management tools
+ */
+export const credentialTools: Tool[] = [
+  {
+    name: 'get_credential_schema',
+    description: 'Get required fields and structure for a credential type before creating it',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        credentialType: {
+          type: 'string',
+          description: 'Credential type name (e.g., "githubApi", "slackApi", "googleSheetsOAuth2Api")',
+        },
+      },
+      required: ['credentialType'],
+    },
+  },
+  {
+    name: 'list_credentials',
+    description: 'List all credentials available in n8n (parsed from workflows + database fallback)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Optional: Filter by credential type (e.g., "githubApi")',
+        },
+      },
+    },
+  },
+  {
+    name: 'create_credential',
+    description: 'Create a new credential with automatic validation against schema',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Friendly name for the credential (e.g., "My GitHub Account")',
+        },
+        type: {
+          type: 'string',
+          description: 'Credential type (use get_credential_schema to see required fields)',
+        },
+        data: {
+          type: 'object',
+          description: 'Credential data - fields depend on type schema (e.g., {"accessToken": "ghp_..."})',
+        },
+        nodesAccess: {
+          type: 'array',
+          description: 'Optional: Restrict credential to specific node types',
+          items: {
+            type: 'object',
+            properties: {
+              nodeType: { type: 'string' },
+            },
+          },
+        },
+      },
+      required: ['name', 'type', 'data'],
+    },
+  },
+  {
+    name: 'update_credential',
+    description: 'Update an existing credential (name, data, or node access)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'Credential ID to update',
+        },
+        name: {
+          type: 'string',
+          description: 'New name for the credential',
+        },
+        data: {
+          type: 'object',
+          description: 'Updated credential data (partial update supported)',
+        },
+        nodesAccess: {
+          type: 'array',
+          description: 'Updated node access restrictions',
+        },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_credential',
+    description: 'Delete a credential with safety checks (blocks if in use unless forced)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: 'Credential ID to delete',
+        },
+        force: {
+          type: 'boolean',
+          description: 'Force delete even if used by workflows (default: false)',
+        },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'test_credential',
+    description: 'Test credential validity by creating a temporary workflow (heavy operation - use sparingly)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        credentialId: {
+          type: 'string',
+          description: 'Credential ID to test',
+        },
+      },
+      required: ['credentialId'],
+    },
+  },
+];
+
+/**
+ * Handle credential tool requests
+ * Routes to appropriate credential service methods
+ */
+export async function handleCredentialTool(name: string, args: any): Promise<any> {
+  switch (name) {
+    case 'get_credential_schema':
+      validateRequired(args, ['credentialType']);
+      return await credentialService.getSchema(args.credentialType);
+
+    case 'list_credentials':
+      return await credentialService.listCredentials(args.type);
+
+    case 'create_credential':
+      validateRequired(args, ['name', 'type', 'data']);
+      return await credentialService.createCredential(args);
+
+    case 'update_credential':
+      validateRequired(args, ['id']);
+      const { id, ...updateData } = args;
+      return await credentialService.updateCredential(id, updateData);
+
+    case 'delete_credential':
+      validateRequired(args, ['id']);
+      await credentialService.deleteCredential(args.id, args.force || false);
+      return {
+        success: true,
+        message: `Credential ${args.id} deleted successfully`,
+      };
+
+    case 'test_credential':
+      validateRequired(args, ['credentialId']);
+      return await credentialService.testCredential(args.credentialId);
+
+    default:
+      throw new Error(`Unknown credential tool: ${name}`);
+  }
+}
+</file>
+
+<file path="src/tools/validation-tools.ts">
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { validationService } from '../services/validation-service.js';
+import { validateRequired } from '../utils/error-handler.js';
+
+/**
+ * Define validation tools for workflow structure checking
+ */
+export const validationTools: Tool[] = [
+  {
+    name: 'validate_workflow_structure',
+    description: 'Validate workflow structure before creation/deployment to catch errors early. Checks for: required fields, unique node IDs/names, valid node types, valid connections, circular dependencies, trigger nodes, and disabled node warnings.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflow: {
+          type: 'object',
+          description: 'Workflow object to validate',
+          properties: {
+            name: { type: 'string', description: 'Workflow name' },
+            nodes: {
+              type: 'array',
+              description: 'Array of node objects',
+              items: { type: 'object' }
+            },
+            connections: {
+              type: 'object',
+              description: 'Connections between nodes'
+            },
+            active: {
+              type: 'boolean',
+              description: 'Whether workflow should be active'
+            },
+          },
+          required: ['name', 'nodes'],
+        },
+      },
+      required: ['workflow'],
+    },
+  },
+];
+
+/**
+ * Handle validation tool invocations
+ *
+ * @param name - Tool name
+ * @param args - Tool arguments
+ * @returns Validation result with errors and warnings
+ */
+export async function handleValidationTool(name: string, args: any): Promise<any> {
+  switch (name) {
+    case 'validate_workflow_structure':
+      validateRequired(args, ['workflow']);
+      return await validationService.validateWorkflowStructure(args.workflow);
+
+    default:
+      throw new Error(`Unknown validation tool: ${name}`);
+  }
+}
+</file>
+
+<file path="src/tools/workflow-tools.ts">
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { n8nApi } from '../services/n8n-api-service.js';
+import { validateRequired } from '../utils/error-handler.js';
+import { N8N_HOST } from '../config/env.js';
+
+/**
+ * Define all 12 existing workflow management tools
+ */
+export const workflowTools: Tool[] = [
+  // WORKFLOW MANAGEMENT
+  {
+    name: 'list_workflows',
+    description: 'List all workflows in n8n',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        active: { type: 'boolean', description: 'Filter by active status' },
+        limit: { type: 'number', description: 'Limit number of results' },
+        tags: { type: 'string', description: 'Filter by tags (comma separated)' },
+      },
+    },
+  },
+  {
+    name: 'get_workflow',
+    description: 'Get detailed information about a workflow (nodes, connections, settings)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The workflow ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'create_workflow',
+    description: 'Create a new workflow',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the workflow' },
+        nodes: { type: 'array', description: 'Array of node objects' },
+        connections: { type: 'object', description: 'Object defining connections' },
+        active: { type: 'boolean', description: 'Whether active' },
+        settings: { type: 'object', description: 'Workflow settings' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'update_workflow',
+    description: 'Update an existing workflow',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Workflow ID' },
+        name: { type: 'string' },
+        nodes: { type: 'array' },
+        connections: { type: 'object' },
+        active: { type: 'boolean' },
+        settings: { type: 'object' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_workflow',
+    description: 'Delete a workflow',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Workflow ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'activate_workflow',
+    description: 'Activate or deactivate a workflow',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Workflow ID' },
+        active: { type: 'boolean', description: 'True to activate' },
+      },
+      required: ['id', 'active'],
+    },
+  },
+
+  // EXECUTION & TESTING
+  {
+    name: 'execute_workflow',
+    description: 'Manually trigger a workflow',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Workflow ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'trigger_webhook',
+    description: 'Trigger a webhook endpoint for testing',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        webhook_path: { type: 'string', description: 'Webhook path/UUID' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE'], default: 'POST' },
+        body: { type: 'object', description: 'JSON body payload' },
+        headers: { type: 'object', description: 'Custom headers' },
+        query_params: { type: 'object', description: 'Query parameters' },
+        test_mode: { type: 'boolean', description: 'Use /webhook-test/ endpoint if true' },
+      },
+      required: ['webhook_path'],
+    },
+  },
+
+  // DEBUGGING & MONITORING
+  {
+    name: 'list_executions',
+    description: 'List recent workflow executions to check status',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        includeData: { type: 'boolean', description: 'Include execution data' },
+        status: { type: 'string', enum: ['error', 'success', 'waiting'] },
+        limit: { type: 'number', default: 20 },
+        workflowId: { type: 'string', description: 'Filter by workflow ID' },
+      },
+    },
+  },
+  {
+    name: 'get_execution',
+    description: 'Get full details of a specific execution for debugging',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Execution ID' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'list_node_types',
+    description: 'List available node types in this n8n instance',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+];
+
+/**
+ * Handle execution of workflow tools
+ */
+export async function handleWorkflowTool(name: string, args: any): Promise<any> {
+  switch (name) {
+    case 'list_workflows':
+      return await n8nApi.listWorkflows(args);
+
+    case 'get_workflow':
+      validateRequired(args, ['id']);
+      return await n8nApi.getWorkflow(args.id);
+
+    case 'create_workflow':
+      validateRequired(args, ['name']);
+      return await n8nApi.createWorkflow(args);
+
+    case 'update_workflow':
+      validateRequired(args, ['id']);
+      const { id: updateId, ...updateData } = args;
+      return await n8nApi.updateWorkflow(updateId, updateData);
+
+    case 'delete_workflow':
+      validateRequired(args, ['id']);
+      await n8nApi.deleteWorkflow(args.id);
+      return { success: true, message: `Workflow ${args.id} deleted` };
+
+    case 'activate_workflow':
+      validateRequired(args, ['id', 'active']);
+      return await n8nApi.activateWorkflow(args.id, args.active);
+
+    case 'execute_workflow':
+      validateRequired(args, ['id']);
+      return await n8nApi.executeWorkflow(args.id);
+
+    case 'trigger_webhook':
+      validateRequired(args, ['webhook_path']);
+      const result = await n8nApi.triggerWebhook({
+        path: args.webhook_path,
+        method: args.method || 'POST',
+        body: args.body,
+        headers: args.headers,
+        queryParams: args.query_params,
+        testMode: args.test_mode,
+      });
+
+      // Add full URL to response for debugging
+      const endpoint = args.test_mode ? 'webhook-test' : 'webhook';
+      return {
+        ...result,
+        url: `${N8N_HOST}/${endpoint}/${args.webhook_path}`,
+      };
+
+    case 'list_executions':
+      return await n8nApi.listExecutions(args);
+
+    case 'get_execution':
+      validateRequired(args, ['id']);
+      return await n8nApi.getExecution(args.id);
+
+    case 'list_node_types':
+      return await n8nApi.listNodeTypes();
+
+    default:
+      throw new Error(`Unknown workflow tool: ${name}`);
+  }
+}
+</file>
+
+<file path="src/utils/error-handler.ts">
+import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { AxiosError } from 'axios';
+
+/**
+ * Convert axios error to standardized MCP error
+ */
+export function handleApiError(error: unknown, context: string): McpError {
+  if (error instanceof AxiosError) {
+    const status = error.response?.status;
+    const message = error.response?.data?.message || error.message;
+
+    // Map HTTP status to MCP error codes
+    if (status === 401 || status === 403) {
+      return new McpError(
+        ErrorCode.InvalidRequest,
+        `Authentication failed: ${message}`
+      );
+    }
+
+    if (status === 404) {
+      return new McpError(
+        ErrorCode.InvalidRequest,
+        `Resource not found: ${message}`
+      );
+    }
+
+    if (status === 400) {
+      return new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid parameters: ${message}`
+      );
+    }
+
+    return new McpError(
+      ErrorCode.InternalError,
+      `${context}: ${message}`
+    );
+  }
+
+  return new McpError(
+    ErrorCode.InternalError,
+    `${context}: ${error instanceof Error ? error.message : 'Unknown error'}`
+  );
+}
+
+/**
+ * Validate required parameters exist
+ */
+export function validateRequired(
+  params: Record<string, any>,
+  required: string[]
+): void {
+  const missing = required.filter(key => !params[key]);
+  if (missing.length > 0) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Missing required parameters: ${missing.join(', ')}`
+    );
+  }
+}
+</file>
+
+<file path="src/utils/expression-validator.ts">
+/**
+ * Extract all {{ }} expressions from a value
+ *
+ * @param value - The value to extract expressions from
+ * @returns Array of extracted expression strings (without {{ }})
+ *
+ * @example
+ * extractExpressions("Hello {{ $json.name }}") // returns ["$json.name"]
+ * extractExpressions({ key: "{{ $node.value }}" }) // returns ["$node.value"]
+ */
+export function extractExpressions(value: any): string[] {
+  if (typeof value !== 'string') return [];
+
+  const regex = /\{\{([^}]+)\}\}/g;
+  const expressions: string[] = [];
+  let match;
+
+  while ((match = regex.exec(value)) !== null) {
+    expressions.push(match[1].trim());
+  }
+
+  return expressions;
+}
+
+/**
+ * Basic validation of n8n expression syntax
+ *
+ * @param expression - The expression string to validate (without {{ }})
+ * @returns Validation result with error message if invalid
+ *
+ * @example
+ * validateExpression("$json.name") // { valid: true }
+ * validateExpression("(1 + 2") // { valid: false, error: "Unbalanced parentheses" }
+ */
+export function validateExpression(expression: string): {
+  valid: boolean;
+  error?: string;
+} {
+  // Check for balanced parentheses
+  let parenCount = 0;
+  for (const char of expression) {
+    if (char === '(') parenCount++;
+    if (char === ')') parenCount--;
+    if (parenCount < 0) {
+      return { valid: false, error: 'Unbalanced parentheses' };
+    }
+  }
+  if (parenCount !== 0) {
+    return { valid: false, error: 'Unbalanced parentheses' };
+  }
+
+  // Check for valid variable references
+  const varRegex = /\$(json|node|vars|parameter|now|today|workflow|execution|input|binary)/;
+  if (expression.includes('$') && !varRegex.test(expression)) {
+    return { valid: false, error: 'Invalid variable reference' };
+  }
+
+  return { valid: true };
+}
+</file>
+
+<file path="src/utils/workflow-graph-analyzer.ts">
+import type { N8nNode, N8nConnection } from '../types/n8n-types.js';
+
+/**
+ * Graph analysis utilities for workflow validation
+ * Handles circular dependency detection and connection validation
+ */
+
+/**
+ * Type guard to check if a value is a valid N8nConnection
+ */
+function isValidConnection(value: any): value is N8nConnection {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.node === 'string' &&
+    typeof value.type === 'string' &&
+    typeof value.index === 'number'
+  );
+}
+
+/**
+ * Detect circular dependencies in workflow graph using Depth-First Search
+ *
+ * @param nodes - Array of workflow nodes
+ * @param connections - Workflow connections object
+ * @param maxDepth - Maximum recursion depth (default: 1000)
+ * @returns True if circular dependency detected
+ *
+ * @example
+ * const hasCycle = detectCircularDependencies(
+ *   [{ id: '1', ... }, { id: '2', ... }],
+ *   { '1': { main: [[{ node: '2', ... }]] } }
+ * );
+ */
+export function detectCircularDependencies(
+  nodes: N8nNode[],
+  connections: Record<string, any>,
+  maxDepth: number = 1000
+): boolean {
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+
+  const dfs = (nodeId: string, depth: number = 0): boolean => {
+    // Prevent stack overflow on very large graphs
+    if (depth > maxDepth) {
+      throw new Error(`Maximum graph depth (${maxDepth}) exceeded - possible infinite loop`);
+    }
+
+    visited.add(nodeId);
+    recursionStack.add(nodeId);
+
+    const outputs = connections[nodeId];
+    if (outputs) {
+      for (const inputType of Object.values(outputs)) {
+        if (Array.isArray(inputType)) {
+          for (const outputIndex of inputType) {
+            if (Array.isArray(outputIndex)) {
+              for (const connection of outputIndex) {
+                // Validate connection has required node field
+                if (isValidConnection(connection)) {
+                  const targetId = connection.node;
+
+                  if (!visited.has(targetId)) {
+                    if (dfs(targetId, depth + 1)) return true;
+                  } else if (recursionStack.has(targetId)) {
+                    return true; // Cycle detected
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    recursionStack.delete(nodeId);
+    return false;
+  };
+
+  for (const node of nodes) {
+    if (!visited.has(node.id)) {
+      if (dfs(node.id)) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Validate workflow connections structure
+ *
+ * @param connections - Workflow connections object
+ * @param nodeIds - Set of valid node IDs
+ * @returns Array of invalid connection errors
+ */
+export function validateConnections(
+  connections: Record<string, any>,
+  nodeIds: Set<string>
+): Array<{ sourceId?: string; targetId?: string; message: string }> {
+  const errors: Array<{ sourceId?: string; targetId?: string; message: string }> = [];
+
+  if (!connections) return errors;
+
+  for (const [sourceId, outputs] of Object.entries(connections)) {
+    // Check source node exists
+    if (!nodeIds.has(sourceId)) {
+      errors.push({
+        sourceId,
+        message: `Connection references non-existent source node: ${sourceId}`,
+      });
+      continue;
+    }
+
+    // Check connection structure is valid before traversing
+    if (!outputs || typeof outputs !== 'object') {
+      errors.push({
+        sourceId,
+        message: `Invalid connection structure for node: ${sourceId}`,
+      });
+      continue;
+    }
+
+    // Check target nodes exist and validate connection structure
+    for (const [outputType, inputTypeValue] of Object.entries(outputs)) {
+      if (!Array.isArray(inputTypeValue)) {
+        errors.push({
+          sourceId,
+          message: `Connection output type '${outputType}' must be an array`,
+        });
+        continue;
+      }
+
+      for (let i = 0; i < inputTypeValue.length; i++) {
+        const outputIndex = inputTypeValue[i];
+
+        if (!Array.isArray(outputIndex)) {
+          errors.push({
+            sourceId,
+            message: `Connection output[${i}] for type '${outputType}' must be an array`,
+          });
+          continue;
+        }
+
+        for (const connection of outputIndex) {
+          // Validate connection object structure
+          if (!isValidConnection(connection)) {
+            errors.push({
+              sourceId,
+              message: `Invalid connection structure in output[${i}]: missing required fields (node, type, index)`,
+            });
+            continue;
+          }
+
+          // Validate target node exists
+          if (!nodeIds.has(connection.node)) {
+            errors.push({
+              sourceId,
+              targetId: connection.node,
+              message: `Connection references non-existent target node: ${connection.node}`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+</file>
+
+<file path="src/config/env.ts">
+import axios, { AxiosInstance } from 'axios';
+
+// Environment variables
+export const N8N_HOST = process.env.N8N_HOST || 'http://localhost:5678';
+export const N8N_API_KEY = process.env.N8N_API_KEY;
+
+if (!N8N_API_KEY) {
+  throw new Error("N8N_API_KEY environment variable is required");
+}
+
+// n8n API client with authentication
+export const n8nClient: AxiosInstance = axios.create({
+  baseURL: `${N8N_HOST}/api/v1`,
+  headers: {
+    'X-N8N-API-KEY': N8N_API_KEY,
+  },
+});
+
+// Webhook client without authentication (simulates external requests)
+export const webhookClient: AxiosInstance = axios.create({
+  baseURL: N8N_HOST,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+</file>
+
+<file path="src/types/n8n-types.ts">
+// n8n Workflow types
+export interface N8nWorkflow {
+  id?: string;
+  name: string;
+  nodes?: N8nNode[];
+  connections?: Record<string, any>;
+  active?: boolean;
+  settings?: Record<string, any>;
+  tags?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  staticData?: any;
+  pinData?: any;
+  versionId?: string;
+}
+
+export interface N8nNode {
+  id: string;
+  name: string;
+  type: string;
+  typeVersion: number;
+  position: [number, number];
+  parameters: Record<string, any>;
+  credentials?: Record<string, any>;
+  disabled?: boolean;
+}
+
+export interface N8nExecution {
+  id: string;
+  finished: boolean;
+  mode: string;
+  startedAt: string;
+  stoppedAt?: string;
+  workflowId: string;
+  data?: {
+    resultData?: {
+      runData?: Record<string, any>;
+      error?: {
+        message: string;
+        node?: string;
+      };
+    };
+  };
+}
+
+export interface N8nCredential {
+  id?: string;
+  name: string;
+  type: string;
+  data?: Record<string, any>;
+  nodesAccess?: Array<{ nodeType: string }>;
+}
+
+export interface N8nCredentialSchema {
+  type: string;
+  displayName: string;
+  properties: Array<{
+    name: string;
+    type: string;
+    required: boolean;
+    description?: string;
+  }>;
+}
+
+// Connection types
+export interface N8nConnection {
+  node: string;
+  type: string;
+  index: number;
+}
+
+export interface N8nConnections {
+  [sourceNodeId: string]: {
+    [outputType: string]: N8nConnection[][][];
+  };
+}
+
+// Re-export template types
+export type {
+  N8nTemplate,
+  TemplateSearchResult,
+  TemplateCacheEntry,
+  ImportTemplateOptions,
+  ExportWorkflowOptions,
+} from './template-types.js';
+</file>
+
+<file path="src/index.ts">
+#!/usr/bin/env node
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+
+import { workflowTools, handleWorkflowTool } from './tools/workflow-tools.js';
+import { credentialTools, handleCredentialTool } from './tools/credential-tools.js';
+import { validationTools, handleValidationTool } from './tools/validation-tools.js';
+import { templateTools, handleTemplateTool } from './tools/template-tools.js';
+
+const server = new Server(
+  {
+    name: 'n8n-custom-mcp',
+    version: '2.0.0-beta',
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+// Register tool list handler
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      ...workflowTools,
+      ...credentialTools,
+      ...validationTools,
+      ...templateTools,
+    ],
+  };
+});
+
+// Register tool call handler
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  try {
+    // Route to appropriate handler
+    let result: any;
+
+    if (workflowTools.some(t => t.name === name)) {
+      result = await handleWorkflowTool(name, args || {});
+    } else if (credentialTools.some(t => t.name === name)) {
+      result = await handleCredentialTool(name, args || {});
+    } else if (validationTools.some(t => t.name === name)) {
+      result = await handleValidationTool(name, args || {});
+    } else if (templateTools.some(t => t.name === name)) {
+      result = await handleTemplateTool(name, args || {});
+    } else {
+      throw new Error(`Unknown tool: ${name}`);
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+});
+
+// Start server
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('n8n-custom-mcp server running on stdio');
+}
+
+main().catch(console.error);
+</file>
+
+<file path="README.md">
+<div align="center">
+
+# 🔌 n8n-custom-mcp v2.0.0-alpha
+
+**Full-power MCP Server cho n8n — Dành cho AI Agent thực sự muốn _làm chủ_ workflow.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-≥18-green.svg)](https://nodejs.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://docker.com/)
+[![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io/)
+[![n8n](https://img.shields.io/badge/n8n-API%20v1-orange.svg)](https://docs.n8n.io/api/)
+
+[Tính năng](#-tính-năng) · [Cài đặt](#-cài-đặt-nhanh) · [Cấu hình](#%EF%B8%8F-cấu-hình) · [Sử dụng](#-sử-dụng) · [Đóng góp](#-đóng-góp)
+
+---
+
+<img src="https://raw.githubusercontent.com/duyasia/n8n-custom-mcp/main/docs/architecture.png" alt="Architecture" width="700" />
+
+</div>
+
+## ❓ Tại sao cần repo này?
+
+Các MCP Server hiện tại cho n8n (ví dụ [`czlonkowski/n8n-mcp`](https://github.com/czlonkowski/n8n-mcp)) chỉ hỗ trợ **đọc và chạy** workflow. Bạn không thể tạo mới, chỉnh sửa, xoá, hay test webhook từ AI agent.
+
+**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **23 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
+
+| Khả năng | MCP Server khác | n8n-custom-mcp |
+|:---------|:---:|:---:|
+| Liệt kê & Xem workflow | ✅ | ✅ |
+| Chạy workflow | ✅ | ✅ |
+| Bật / Tắt workflow | ✅ | ✅ |
+| **Tạo mới workflow** | ❌ | ✅ |
+| **Sửa workflow** | ❌ | ✅ |
+| **Xoá workflow** | ❌ | ✅ |
+| **Test Webhook** (kể cả test mode) | ❌ | ✅ |
+| **Xem lịch sử execution** | ❌ | ✅ |
+| **Debug chi tiết execution** | ❌ | ✅ |
+| **Liệt kê node types** | ❌ | ✅ |
+| **Quản lý Credentials** | ❌ | ✅ |
+
+## 🚀 Tính năng
+
+### 📋 Workflow CRUD
+Tạo, đọc, sửa, xoá workflow hoàn toàn qua MCP — AI agent có thể tự xây dựng workflow từ đầu bằng ngôn ngữ tự nhiên.
+
+### 🔐 Credentials Management (NEW in v2.0)
+Quản lý credentials hoàn toàn tự động:\n- Tạo, cập nhật, xoá credentials với validation\n- Liệt kê credentials từ workflows và database\n- Test credential validity tự động\n- Safety checks ngăn chặn xoá credentials đang sử dụng
+
+### ✅ Workflow Validation (NEW in v2.0)
+Kiểm tra cấu trúc workflow trước khi deploy để ngăn chặn lỗi:\n- Validate cấu trúc JSON và các trường bắt buộc\n- Phát hiện duplicate node IDs/names\n- Kiểm tra node types có tồn tại trên instance\n- Validate connections giữa các nodes\n- Phát hiện circular dependencies (vòng lặp)\n- Cảnh báo missing trigger nodes cho active workflows\n- Giảm 50% thời gian debug của AI agent
+
+### 🎯 Webhook Testing
+Tool `trigger_webhook` hỗ trợ:
+- Gọi webhook với bất kỳ HTTP method nào (GET/POST/PUT/DELETE)
+- **Test mode** (`/webhook-test/`) để debug trên n8n Editor
+- **Production mode** (`/webhook/`) cho webhook đang active
+- Custom headers & query parameters
+
+### 🔍 Execution Debugging
+Theo dõi và debug workflow execution:
+- Liệt kê lịch sử chạy, lọc theo trạng thái (success/error/waiting)
+- Xem chi tiết dữ liệu đầu vào/đầu ra của từng node
+- Đọc error message cụ thể để AI tự sửa lỗi
+
+### 🐳 Docker-Ready
+Đóng gói sẵn Dockerfile multi-stage + [supergateway](https://github.com/nichochar/supergateway) để expose MCP qua HTTP — chỉ cần `docker compose up`.
+
+## 📦 Cài đặt nhanh
+
+### Yêu cầu
+
+- [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/)
+- n8n instance đang chạy (hoặc chạy cùng docker-compose)
+- [n8n API Key](https://docs.n8n.io/api/authentication/)
+
+### Bước 1: Clone
+
+```bash
+git clone https://github.com/duyasia/n8n-custom-mcp.git
+cd n8n-custom-mcp
+```
+
+### Bước 2: Cấu hình biến môi trường
+
+```bash
+cp .env.example .env
+```
+
+Chỉnh sửa file `.env`:
+
+```env
+N8N_HOST=http://n8n:5678       # URL nội bộ Docker
+N8N_API_KEY=your_api_key_here  # Tạo tại n8n → Settings → API
+```
+
+### Bước 3: Chạy
+
+**Standalone (chỉ MCP server):**
+
+```bash
+docker compose up -d --build
+```
+
+**Tích hợp vào n8n stack có sẵn:**
+
+Thêm service sau vào file `docker-compose.yml` của bạn:
+
+```yaml
+n8n-mcp:
+  build:
+    context: ./n8n-custom-mcp
+  restart: always
+  ports:
+    - "3000:3000"
+  environment:
+    - N8N_HOST=http://n8n:5678
+    - N8N_API_KEY=${N8N_API_KEY}
+  depends_on:
+    n8n:
+      condition: service_started
+  command: >
+    --stdio "node dist/index.js"
+    --port 3000
+    --outputTransport streamableHttp
+    --streamableHttpPath /mcp
+    --cors
+```
+
+### Bước 4: Kết nối LobeHub/OpenClaw
+
+Trong phần cấu hình MCP Plugin:
+
+| Trường | Giá trị |
+|:-------|:--------|
+| Type | MCP (Streamable HTTP) |
+| URL | `http://<IP-máy-chủ>:3000/mcp` |
+
+Sau khi kết nối, bạn sẽ thấy **23 tools** xuất hiện. ✅
+
+## ⚙️ Cấu hình
+
+### Biến môi trường
+
+| Biến | Bắt buộc | Mặc định | Mô tả |
+|:-----|:--------:|:---------|:------|
+| `N8N_HOST` | ✅ | `http://localhost:5678` | URL đến n8n instance |
+| `N8N_API_KEY` | ✅ | — | API Key từ n8n Settings |
+| `PORT` | ❌ | `3000` | Port cho MCP HTTP endpoint |
+
+### Supergateway Options
+
+MCP server chạy qua stdio, được wrap bởi [supergateway](https://github.com/nichochar/supergateway) để expose qua HTTP:
+
+```bash
+supergateway \
+  --stdio "node dist/index.js" \
+  --port 3000 \
+  --outputTransport streamableHttp \
+  --streamableHttpPath /mcp \
+  --cors
+```
+
+## 💡 Sử dụng
+
+### Danh sách 23 Tools
+
+#### Workflow Management (12 tools)
+
+| Tool | Mô tả |
+|:-----|:------|
+| `list_workflows` | Liệt kê workflows (lọc theo active, limit, tags) |
+| `get_workflow` | Xem chi tiết JSON của workflow |
+| `create_workflow` | Tạo workflow mới từ JSON definition |
+| `update_workflow` | Cập nhật workflow (tên, nodes, connections...) |
+| `delete_workflow` | Xoá workflow |
+| `activate_workflow` | Bật hoặc tắt workflow |
+| `execute_workflow` | Chạy workflow theo ID |
+| `trigger_webhook` | Gọi webhook endpoint (hỗ trợ test mode) |
+| `list_executions` | Xem lịch sử chạy, lọc theo status/workflow |
+| `get_execution` | Xem chi tiết execution (data, errors) |
+| `list_node_types` | Liệt kê các node types đang cài |
+| `validate_workflow_structure` | Kiểm tra lỗi cấu trúc workflow trước khi deploy |
+
+#### Credentials Management (6 tools)
+
+| Tool | Mô tả |
+|:-----|:------|
+| `get_credential_schema` | Lấy schema (required fields) của credential type |
+| `list_credentials` | Liệt kê credentials (từ workflows + database) |
+| `create_credential` | Tạo credential mới với validation |
+| `update_credential` | Cập nhật credential existing |
+| `delete_credential` | Xoá credential (có safety check) |
+| `test_credential` | Test credential validity tự động |
+
+#### Template System (4 tools - NEW in v2.0-beta)
+
+| Tool | Mô tả |
+|:-----|:------|
+| `search_templates` | Tìm kiếm workflow mẫu từ thư viện n8n.io |
+| `get_template_details` | Lấy chi tiết JSON của một template |
+| `import_template` | Import template vào n8n với dependency resolution |
+| `export_workflow_as_template` | Export workflow thành template an toàn (đã xóa credentials) |
+
+### Ví dụ: AI tự tạo workflow với credentials
+
+```
+Bạn: "Tạo workflow post GitHub issues to Slack"
+
+AI tự động:
+  1. list_credentials  → Check GitHub + Slack credentials
+  2. get_credential_schema → Lấy schema githubApi
+  3. create_credential → Tạo GitHub credential (yêu cầu token từ user)
+  4. test_credential   → Verify GitHub token valid
+  5. create_credential → Tạo Slack credential
+  6. create_workflow   → Tạo workflow với cả 2 credentials
+  7. activate_workflow → Bật workflow ✅
+```
+
+### Ví dụ: Tự tạo & test webhook workflow
+
+```
+Bạn: "Tạo webhook nhận email từ Outlook, lấy subject và sender"
+
+AI tự động thực hiện:
+  1. create_workflow  → Tạo workflow với Webhook + Set node
+  2. activate_workflow → Bật workflow
+  3. trigger_webhook   → Gửi POST test data
+  4. list_executions   → Kiểm tra kết quả
+  5. get_execution     → Đọc output → Xác nhận thành công ✅
+```
+
+### Nâng cao: Kết hợp n8n-skills
+
+Để AI agent thông minh hơn khi tạo workflow, hãy nhúng kiến thức từ [czlonkowski/n8n-skills](https://github.com/czlonkowski/n8n-skills) vào System Prompt. Xem [USAGE.md](docs/USAGE.md) để biết chi tiết.
+
+## 🏗 Kiến trúc
+
+```
+LobeHub / OpenClaw
+       │
+       │  MCP (Streamable HTTP)
+       ▼
+┌──────────────────────┐
+│   n8n-custom-mcp     │
+│   (supergateway)     │
+│   :3000/mcp          │
+│                      │
+│   17 MCP Tools       │
+│   TypeScript + Axios │
+└──────────┬───────────┘
+           │  REST API (nội bộ Docker)
+           ▼
+┌──────────────────────┐
+│   n8n Instance       │
+│   :5678              │
+│                      │
+│   PostgreSQL + Redis │
+└──────────────────────┘
+```
+
+## 🔒 Bảo mật
+
+- ⚠️ **KHÔNG bao giờ** hardcode API Key trong source code
+- File `.env` đã được thêm vào `.gitignore`
+- MCP server giao tiếp với n8n qua mạng Docker nội bộ
+- Webhook client **không** gửi API Key (mô phỏng request từ bên ngoài)
+
+## 🤝 Đóng góp
+
+Mọi đóng góp đều được chào đón! Xem [CONTRIBUTING.md](CONTRIBUTING.md) để biết chi tiết.
+
+Một vài ý tưởng:
+- [x] Thêm `search_templates` — tìm workflow mẫu từ n8n.io
+- [x] Thêm `get_credentials` — quản lý credentials qua MCP
+- [x] Thêm tool `import_workflow` / `export_workflow`
+- [ ] Hỗ trợ SSE transport
+- [ ] Viết test cases
+
+## 📝 License
+
+[MIT License](LICENSE) — Sử dụng thoải mái, kể cả cho mục đích thương mại.
+
+## 🙏 Credits
+
+- Lấy cảm hứng từ [czlonkowski/n8n-mcp](https://github.com/czlonkowski/n8n-mcp)
+- Kiến thức n8n từ [czlonkowski/n8n-skills](https://github.com/czlonkowski/n8n-skills)
+- MCP Protocol: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
+- [n8n](https://n8n.io/) — Workflow Automation Platform
+
+---
+
+<div align="center">
+
+**Nếu thấy hữu ích, hãy ⭐ star repo để ủng hộ!**
+
+Made with ❤️ by [duyasia](https://github.com/duyasia)
+
+</div>
+</file>
+
+</files>

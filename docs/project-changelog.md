@@ -2,6 +2,16 @@
 
 Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận tại đây.
 
+## [2.2.0] - 2026-02-11
+
+### Added
+- **Phase 5: Advanced Validation & Linting** hoàn tất.
+- Triển khai 4 tools mới: `validate_workflow_credentials`, `validate_workflow_expressions`, `lint_workflow`, `suggest_workflow_improvements`.
+- Hệ thống `ValidationService` nâng cấp: Kiểm tra sự tồn tại của credentials, khớp kiểu node, và validate cú pháp JavaScript trong expressions.
+- Công cụ `Linting`: Phát hiện orphaned nodes, dead branches, thiếu error handling, và các vấn đề bảo mật (hardcoded secrets).
+- Công cụ `AI Suggestions`: Phân tích cấu trúc workflow và đưa ra các đề xuất tối ưu hóa (ví dụ: chuyển logic phức tạp sang Code node).
+- Tăng tổng số tool lên 31 tools.
+
 ## [2.1.0] - 2026-02-11
 
 ### Added

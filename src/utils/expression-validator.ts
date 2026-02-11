@@ -1,3 +1,5 @@
+import { Script } from 'vm';
+
 /**
  * Extract all {{ }} expressions from a value
  *
@@ -11,7 +13,8 @@
 export function extractExpressions(value: any): string[] {
   if (typeof value !== 'string') return [];
 
-  const regex = /\{\{([^}]+)\}\}/g;
+  // Use a more robust regex that handles nested braces
+  const regex = /\{\{([\s\S]*?)\}\}/g;
   const expressions: string[] = [];
   let match;
 
@@ -23,7 +26,7 @@ export function extractExpressions(value: any): string[] {
 }
 
 /**
- * Basic validation of n8n expression syntax
+ * Advanced validation of n8n expression syntax
  *
  * @param expression - The expression string to validate (without {{ }})
  * @returns Validation result with error message if invalid
@@ -36,7 +39,12 @@ export function validateExpression(expression: string): {
   valid: boolean;
   error?: string;
 } {
-  // Check for balanced parentheses
+  // 1. Check for empty expression
+  if (!expression || expression.trim() === '') {
+    return { valid: false, error: 'Empty expression' };
+  }
+
+  // 2. Check for balanced parentheses
   let parenCount = 0;
   for (const char of expression) {
     if (char === '(') parenCount++;
@@ -49,10 +57,30 @@ export function validateExpression(expression: string): {
     return { valid: false, error: 'Unbalanced parentheses' };
   }
 
-  // Check for valid variable references
-  const varRegex = /\$(json|node|vars|parameter|now|today|workflow|execution|input|binary)/;
+  // 3. Check for valid variable references
+  const varRegex = /\$(json|node|vars|parameter|now|today|workflow|execution|input|binary|env|prevNode|self)/;
   if (expression.includes('$') && !varRegex.test(expression)) {
-    return { valid: false, error: 'Invalid variable reference' };
+    // Basic check for common mistakes like $jsn instead of $json
+    const potentialTypos = /\$([a-zA-Z]+)/g;
+    let match;
+    while ((match = potentialTypos.exec(expression)) !== null) {
+      const varName = match[1];
+      if (!varRegex.test('$' + varName)) {
+        return { valid: false, error: `Invalid variable reference: $${varName}` };
+      }
+    }
+  }
+
+  // 4. Validate JS syntax using vm.Script (without executing)
+  try {
+    // Replace n8n specific variables with placeholders to allow JS syntax validation
+    const sanitizedExpr = expression.replace(/\$(json|node|vars|parameter|now|today|workflow|execution|input|binary|env|prevNode|self)/g, '___V');
+    new Script(sanitizedExpr);
+  } catch (error) {
+    return {
+      valid: false,
+      error: `Syntax error: ${error instanceof Error ? error.message : 'Invalid JavaScript'}`
+    };
   }
 
   return { valid: true };
