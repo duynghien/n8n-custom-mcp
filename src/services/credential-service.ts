@@ -1,0 +1,259 @@
+import { n8nApi } from './n8n-api-service.js';
+import { credentialTestService } from './credential-test-service.js';
+import { handleApiError } from '../utils/error-handler.js';
+import type { N8nCredential, N8nCredentialSchema } from '../types/n8n-types.js';
+
+/**
+ * Service class for n8n credential management
+ * Handles credential CRUD, validation, testing, and usage tracking
+ */
+export class CredentialService {
+  /**
+   * Get schema for credential type
+   * @throws McpError if credential type not found
+   */
+  async getSchema(credentialType: string): Promise<N8nCredentialSchema> {
+    try {
+      return await n8nApi.getCredentialSchema(credentialType);
+    } catch (error) {
+      throw handleApiError(error, `Schema not found for ${credentialType}`);
+    }
+  }
+
+  /**
+   * List credentials - HYBRID APPROACH
+   * 1. Parse from workflows (primary)
+   * 2. Fallback to psql if available
+   * 3. Deduplicate and return
+   */
+  async listCredentials(type?: string): Promise<N8nCredential[]> {
+    const credentials = new Map<string, N8nCredential>();
+
+    // Method 1: Parse from workflows
+    const credentialsFromWorkflows = await this.listFromWorkflows();
+    credentialsFromWorkflows.forEach(cred => {
+      credentials.set(cred.id!, cred);
+    });
+
+    // Method 2: Fallback to psql (if database accessible)
+    try {
+      const credentialsFromDb = await this.listFromDatabase();
+      credentialsFromDb.forEach(cred => {
+        credentials.set(cred.id!, cred);
+      });
+    } catch (error) {
+      // Database not accessible, use workflow data only
+      console.warn('Database query failed, using workflow data only');
+    }
+
+    // Filter by type if specified
+    let result = Array.from(credentials.values());
+    if (type) {
+      result = result.filter(cred => cred.type === type);
+    }
+
+    return result;
+  }
+
+  /**
+   * Parse credentials from all workflows
+   * @private
+   */
+  private async listFromWorkflows(): Promise<N8nCredential[]> {
+    const workflows = await n8nApi.listWorkflows({});
+    const credentialMap = new Map<string, N8nCredential>();
+
+    for (const workflow of workflows.data) {
+      if (!workflow.nodes) continue;
+
+      for (const node of workflow.nodes) {
+        if (!node.credentials) continue;
+
+        // Extract credential references
+        for (const [credType, credData] of Object.entries(node.credentials)) {
+          const credId = (credData as any).id;
+          const credName = (credData as any).name;
+
+          if (credId && !credentialMap.has(credId)) {
+            credentialMap.set(credId, {
+              id: credId,
+              name: credName || 'Unknown',
+              type: credType,
+            });
+          }
+        }
+      }
+    }
+
+    return Array.from(credentialMap.values());
+  }
+
+  /**
+   * Query credentials from PostgreSQL database (fallback)
+   * Requires psql command and proper permissions
+   * @private
+   */
+  private async listFromDatabase(): Promise<N8nCredential[]> {
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    const dbHost = process.env.DB_POSTGRESDB_HOST || 'localhost';
+    const dbPort = process.env.DB_POSTGRESDB_PORT || '5432';
+    const dbName = process.env.DB_POSTGRESDB_DATABASE || 'n8n';
+    const dbUser = process.env.DB_POSTGRESDB_USER || 'n8n';
+    const dbPassword = process.env.DB_POSTGRESDB_PASSWORD || '';
+
+    const query = `SELECT id, name, type FROM credentials_entity;`;
+    const command = `PGPASSWORD="${dbPassword}" psql -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -t -A -F"," -c "${query}"`;
+
+    const { stdout } = await execAsync(command);
+
+    // Parse CSV output
+    const lines = stdout.trim().split('\n').filter(line => line);
+    return lines.map(line => {
+      const [id, name, type] = line.split(',');
+      return { id, name, type };
+    });
+  }
+
+  /**
+   * Validate credential data against schema
+   */
+  async validateCredentialData(
+    type: string,
+    data: Record<string, any>
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const schema = await this.getSchema(type);
+    const errors: string[] = [];
+
+    // Check required fields
+    for (const prop of schema.properties) {
+      if (prop.required && !data[prop.name]) {
+        errors.push(`Missing required field: ${prop.name}`);
+      }
+    }
+
+    // Check field types (basic validation)
+    for (const [key, value] of Object.entries(data)) {
+      const prop = schema.properties.find(p => p.name === key);
+      if (!prop) continue;
+
+      if (prop.type === 'string' && typeof value !== 'string') {
+        errors.push(`Field ${key} must be a string`);
+      } else if (prop.type === 'number' && typeof value !== 'number') {
+        errors.push(`Field ${key} must be a number`);
+      } else if (prop.type === 'boolean' && typeof value !== 'boolean') {
+        errors.push(`Field ${key} must be a boolean`);
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+    };
+  }
+
+  /**
+   * Create credential with validation
+   * Warns if duplicate name exists (n8n allows duplicates)
+   */
+  async createCredential(credential: N8nCredential): Promise<N8nCredential> {
+    // Validate data against schema
+    const validation = await this.validateCredentialData(
+      credential.type,
+      credential.data || {}
+    );
+
+    if (!validation.valid) {
+      throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
+    }
+
+    // Check for duplicate names (warning only)
+    const existing = await this.listCredentials();
+    const duplicate = existing.find(c => c.name === credential.name);
+    if (duplicate) {
+      console.warn(
+        `Warning: Credential name "${credential.name}" already exists (ID: ${duplicate.id})`
+      );
+    }
+
+    // Create via API
+    return await n8nApi.createCredential(credential);
+  }
+
+  /**
+   * Update existing credential
+   */
+  async updateCredential(id: string, updates: Partial<N8nCredential>): Promise<N8nCredential> {
+    return await n8nApi.updateCredential(id, updates);
+  }
+
+  /**
+   * Find all workflows using a specific credential
+   * Used for safety checks before deletion
+   */
+  async getCredentialUsage(credentialId: string): Promise<string[]> {
+    const workflows = await n8nApi.listWorkflows({});
+    const usedBy: string[] = [];
+
+    for (const workflow of workflows.data) {
+      if (!workflow.nodes) continue;
+
+      for (const node of workflow.nodes) {
+        if (!node.credentials) continue;
+
+        for (const credData of Object.values(node.credentials)) {
+          if ((credData as any).id === credentialId) {
+            usedBy.push(workflow.id!);
+            break;
+          }
+        }
+      }
+    }
+
+    return usedBy;
+  }
+
+  /**
+   * Delete credential with safety checks
+   * @param id Credential ID
+   * @param force Skip in-use check
+   */
+  async deleteCredential(id: string, force: boolean = false): Promise<void> {
+    if (!force) {
+      const usedBy = await this.getCredentialUsage(id);
+      if (usedBy.length > 0) {
+        throw new Error(
+          `Credential is used by ${usedBy.length} workflow(s): ${usedBy.join(', ')}. ` +
+          `Use force=true to delete anyway.`
+        );
+      }
+    }
+
+    await n8nApi.deleteCredential(id);
+  }
+
+  /**
+   * Test credential validity
+   * Delegates to credential-test-service
+   */
+  async testCredential(credentialId: string): Promise<{
+    valid: boolean;
+    message: string;
+    testedAt: string;
+  }> {
+    // Get credential info to pass to test service
+    const credentials = await this.listCredentials();
+    const credential = credentials.find(c => c.id === credentialId);
+
+    if (!credential) {
+      throw new Error(`Credential ${credentialId} not found`);
+    }
+
+    return await credentialTestService.testCredential(credentialId, credential);
+  }
+}
+
+// Export singleton instance
+export const credentialService = new CredentialService();

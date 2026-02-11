@@ -22,7 +22,7 @@
 
 Các MCP Server hiện tại cho n8n (ví dụ [`czlonkowski/n8n-mcp`](https://github.com/czlonkowski/n8n-mcp)) chỉ hỗ trợ **đọc và chạy** workflow. Bạn không thể tạo mới, chỉnh sửa, xoá, hay test webhook từ AI agent.
 
-**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **12 tools** bao phủ toàn bộ vòng đời quản lý workflow:
+**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **17 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
 
 | Khả năng | MCP Server khác | n8n-custom-mcp |
 |:---------|:---:|:---:|
@@ -36,11 +36,15 @@ Các MCP Server hiện tại cho n8n (ví dụ [`czlonkowski/n8n-mcp`](https://g
 | **Xem lịch sử execution** | ❌ | ✅ |
 | **Debug chi tiết execution** | ❌ | ✅ |
 | **Liệt kê node types** | ❌ | ✅ |
+| **Quản lý Credentials** | ❌ | ✅ |
 
 ## 🚀 Tính năng
 
 ### 📋 Workflow CRUD
 Tạo, đọc, sửa, xoá workflow hoàn toàn qua MCP — AI agent có thể tự xây dựng workflow từ đầu bằng ngôn ngữ tự nhiên.
+
+### 🔐 Credentials Management (NEW in v2.0)
+Quản lý credentials hoàn toàn tự động:\n- Tạo, cập nhật, xoá credentials với validation\n- Liệt kê credentials từ workflows và database\n- Test credential validity tự động\n- Safety checks ngăn chặn xoá credentials đang sử dụng
 
 ### 🎯 Webhook Testing
 Tool `trigger_webhook` hỗ trợ:
@@ -155,9 +159,9 @@ supergateway \
 
 ## 💡 Sử dụng
 
-### Danh sách 12 Tools
+### Danh sách 17 Tools
 
-#### Workflow Management
+#### Workflow Management (11 tools)
 
 | Tool | Mô tả |
 |:-----|:------|
@@ -167,26 +171,37 @@ supergateway \
 | `update_workflow` | Cập nhật workflow (tên, nodes, connections...) |
 | `delete_workflow` | Xoá workflow |
 | `activate_workflow` | Bật hoặc tắt workflow |
-
-#### Execution & Testing
-
-| Tool | Mô tả |
-|:-----|:------|
 | `execute_workflow` | Chạy workflow theo ID |
 | `trigger_webhook` | Gọi webhook endpoint (hỗ trợ test mode) |
-
-#### Monitoring & Debugging
-
-| Tool | Mô tả |
-|:-----|:------|
 | `list_executions` | Xem lịch sử chạy, lọc theo status/workflow |
 | `get_execution` | Xem chi tiết execution (data, errors) |
+| `list_node_types` | Liệt kê các node types đang cài |
 
-#### Discovery
+#### Credentials Management (6 tools - NEW in v2.0)
 
 | Tool | Mô tả |
 |:-----|:------|
-| `list_node_types` | Liệt kê các node types đang cài |
+| `get_credential_schema` | Lấy schema (required fields) của credential type |
+| `list_credentials` | Liệt kê credentials (từ workflows + database) |
+| `create_credential` | Tạo credential mới với validation |
+| `update_credential` | Cập nhật credential existing |
+| `delete_credential` | Xoá credential (có safety check) |
+| `test_credential` | Test credential validity tự động |
+
+### Ví dụ: AI tự tạo workflow với credentials
+
+```
+Bạn: "Tạo workflow post GitHub issues to Slack"
+
+AI tự động:
+  1. list_credentials  → Check GitHub + Slack credentials
+  2. get_credential_schema → Lấy schema githubApi
+  3. create_credential → Tạo GitHub credential (yêu cầu token từ user)
+  4. test_credential   → Verify GitHub token valid
+  5. create_credential → Tạo Slack credential
+  6. create_workflow   → Tạo workflow với cả 2 credentials
+  7. activate_workflow → Bật workflow ✅
+```
 
 ### Ví dụ: Tự tạo & test webhook workflow
 
@@ -217,7 +232,7 @@ LobeHub / OpenClaw
 │   (supergateway)     │
 │   :3000/mcp          │
 │                      │
-│   12 MCP Tools       │
+│   17 MCP Tools       │
 │   TypeScript + Axios │
 └──────────┬───────────┘
            │  REST API (nội bộ Docker)

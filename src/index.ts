@@ -7,6 +7,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { workflowTools, handleWorkflowTool } from './tools/workflow-tools.js';
+import { credentialTools, handleCredentialTool } from './tools/credential-tools.js';
 
 const server = new Server(
   {
@@ -25,7 +26,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       ...workflowTools,
-      // Future: credentialTools, templateTools, validationTools, backupTools
+      ...credentialTools,
+      // Future: templateTools, validationTools, backupTools
     ],
   };
 });
@@ -36,19 +38,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     // Route to appropriate handler
+    let result: any;
+
     if (workflowTools.some(t => t.name === name)) {
-      const result = await handleWorkflowTool(name, args || {});
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      result = await handleWorkflowTool(name, args || {});
+    } else if (credentialTools.some(t => t.name === name)) {
+      result = await handleCredentialTool(name, args || {});
+    } else {
+      throw new Error(`Unknown tool: ${name}`);
     }
 
-    throw new Error(`Unknown tool: ${name}`);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
   } catch (error) {
     return {
       content: [
