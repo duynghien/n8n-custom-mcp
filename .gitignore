@@ -1,41 +1,59 @@
 # Dependencies
 node_modules/
+jspm_packages/
 
-# Build output
+# Build and Tooling
 dist/
+lib-cov/
+coverage/
+.nyc_output/
+.vitest-cache/
 
-# Environment variables
+# Environment Variables & Secrets
 .env
 .env.local
 .env.*.local
+.pnp
+.pnp.js
 
-# IDE
+# AI Tools & LLM Context
+.claude/
+.opencode/
+plans/
+CLAUDE.md
+AGENTS.md
+repomix-output-docs.xml
+release-manifest.json
+
+# IDEs and Editors
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.project
+.classpath
+.settings/
 
-# OS
+# OS Files
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Logs
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
 # Docker
 docker-compose.override.yml
 
-# Testing
-coverage/
-.vitest-cache/
-
-# Backups (contain workflow data)
+# Backups & Data
 backups/
-
-# Package lock (optional - uncomment if you want to ignore)
-# package-lock.json
-.claude
-.opencode
-plans
+*.bak
+*.swp
