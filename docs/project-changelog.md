@@ -2,6 +2,17 @@
 
 Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận tại đây.
 
+## [2.1.0] - 2026-02-11
+
+### Added
+- **Phase 4: Backup System** hoàn tất.
+- Triển khai 4 tools mới: `backup_workflow`, `list_workflow_backups`, `restore_workflow`, `diff_workflow_versions`.
+- Cơ chế `BackupService` lưu trữ cục bộ với Docker volume persistence.
+- Tính năng `Auto-backup`: Tự động sao lưu trạng thái hiện tại trước khi restore.
+- Cơ chế `Rotation`: Tự động xóa các bản backup cũ, chỉ giữ lại 10 bản gần nhất mỗi workflow để tối ưu dung lượng đĩa.
+- Kiểm tra an toàn: Path traversal prevention, Disk space check, và race condition handling.
+- 100% test coverage cho logic backup với 177 tests tổng cộng (passing).
+
 ## [2.0.0-beta] - 2026-02-11
 
 ### Added
