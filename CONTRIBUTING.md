@@ -57,7 +57,12 @@ Mở PR trên GitHub với mô tả rõ ràng về thay đổi.
 ```
 n8n-custom-mcp/
 ├── src/
-│   └── index.ts          ← Toàn bộ logic MCP server
+│   ├── index.ts          ← Entry point (MCP server setup)
+│   ├── tools/            ← Định nghĩa các MCP tools (workflow, credential, v.v.)
+│   ├── services/         ← Logic nghiệp vụ (API, backup, validation, v.v.)
+│   ├── utils/            ← Utilities (cache, error handling, validators)
+│   ├── types/            ← TypeScript interfaces
+│   └── __tests__/        ← Unit & Integration tests
 ├── package.json
 ├── tsconfig.json
 ├── Dockerfile            ← Multi-stage build
@@ -68,40 +73,17 @@ n8n-custom-mcp/
 ├── LICENSE
 └── docs/
     ├── USAGE.md          ← Hướng dẫn sử dụng nâng cao
-    └── architecture.png  ← Sơ đồ kiến trúc
+    ├── API.md            ← Tài liệu chi tiết 31 tools
+    └── project-roadmap.md ← Lộ trình phát triển
 ```
 
 ## 🎯 Thêm MCP Tool mới
 
-Khi muốn thêm tool mới, bạn cần sửa 2 chỗ trong `src/index.ts`:
+Dự án sử dụng kiến trúc modular. Để thêm tool mới:
 
-**1. Đăng ký tool** — trong `ListToolsRequestSchema` handler:
-
-```typescript
-{
-  name: 'your_new_tool',
-  description: 'Mô tả tool',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      param1: { type: 'string', description: 'Mô tả param' },
-    },
-    required: ['param1'],
-  },
-},
-```
-
-**2. Xử lý logic** — trong `CallToolRequestSchema` handler:
-
-```typescript
-if (name === 'your_new_tool') {
-  const { param1 } = args as any;
-  const response = await n8n.get(`/your-endpoint/${param1}`);
-  return {
-    content: [{ type: 'text', text: JSON.stringify(response.data, null, 2) }],
-  };
-}
-```
+1. **Định nghĩa Tool**: Thêm vào file tương ứng trong `src/tools/` (ví dụ: `workflow-tools.ts`).
+2. **Triển khai Logic**: Thêm service method trong `src/services/`.
+3. **Đăng ký Handler**: Cập nhật handler trong `src/tools/` và đảm bảo nó được gọi từ `src/index.ts`.
 
 ## 📐 Quy ước
 

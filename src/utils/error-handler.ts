@@ -3,11 +3,16 @@ import { AxiosError } from 'axios';
 
 /**
  * Convert axios error to standardized MCP error
+ * Sanitizes error message to prevent sensitive data leakage
  */
 export function handleApiError(error: unknown, context: string): McpError {
   if (error instanceof AxiosError) {
     const status = error.response?.status;
-    const message = error.response?.data?.message || error.message;
+    let message = error.response?.data?.message || error.message;
+
+    // Basic sanitization: remove potential tokens/keys from message
+    message = message.replace(/([a-zA-Z0-9]{32,})/g, '[REDACTED]');
+    message = message.replace(/(x-n8n-api-key|authorization|token|password|secret)=[^&\s]+/gi, '$1=[REDACTED]');
 
     // Map HTTP status to MCP error codes
     if (status === 401 || status === 403) {

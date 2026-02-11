@@ -15,7 +15,7 @@ import { backupTools, handleBackupTool } from './tools/backup-tools.js';
 const server = new Server(
   {
     name: 'n8n-custom-mcp',
-    version: '2.0.0-beta',
+    version: '2.0.0',
   },
   {
     capabilities: {

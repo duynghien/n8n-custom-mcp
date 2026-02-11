@@ -1,6 +1,7 @@
 import { n8nApi } from './n8n-api-service.js';
 import { credentialTestService } from './credential-test-service.js';
 import { handleApiError } from '../utils/error-handler.js';
+import { TemplateCache } from '../utils/template-cache.js';
 import type { N8nCredential, N8nCredentialSchema } from '../types/n8n-types.js';
 
 /**
@@ -8,6 +9,7 @@ import type { N8nCredential, N8nCredentialSchema } from '../types/n8n-types.js';
  * Handles credential CRUD, validation, testing, and usage tracking
  */
 export class CredentialService {
+  private cache: TemplateCache = new TemplateCache(30); // 30s cache for credentials
   /**
    * Get schema for credential type
    * @throws McpError if credential type not found
@@ -22,11 +24,16 @@ export class CredentialService {
 
   /**
    * List credentials - HYBRID APPROACH
-   * 1. Parse from workflows (primary)
-   * 2. Fallback to psql if available
-   * 3. Deduplicate and return
+   * 1. Check cache
+   * 2. Parse from workflows (primary)
+   * 3. Fallback to psql if available
+   * 4. Deduplicate and return
    */
   async listCredentials(type?: string): Promise<N8nCredential[]> {
+    const cacheKey = `list:${type || 'all'}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) return cached;
+
     const credentials = new Map<string, N8nCredential>();
 
     // Method 1: Parse from workflows
@@ -52,6 +59,7 @@ export class CredentialService {
       result = result.filter(cred => cred.type === type);
     }
 
+    this.cache.set(cacheKey, result);
     return result;
   }
 
@@ -104,8 +112,11 @@ export class CredentialService {
     const dbUser = process.env.DB_POSTGRESDB_USER || 'n8n';
     const dbPassword = process.env.DB_POSTGRESDB_PASSWORD || '';
 
+    // Basic sanitization for shell command inputs
+    const sanitizeShell = (str: string) => str.replace(/(["'$`\\])/g, '\\$1');
+
     const query = `SELECT id, name, type FROM credentials_entity;`;
-    const command = `PGPASSWORD="${dbPassword}" psql -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -t -A -F"," -c "${query}"`;
+    const command = `PGPASSWORD="${sanitizeShell(dbPassword)}" psql -h ${sanitizeShell(dbHost)} -p ${sanitizeShell(dbPort)} -U ${sanitizeShell(dbUser)} -d ${sanitizeShell(dbName)} -t -A -F"," -c "${query}"`;
 
     const { stdout } = await execAsync(command);
 
@@ -179,14 +190,18 @@ export class CredentialService {
     }
 
     // Create via API
-    return await n8nApi.createCredential(credential);
+    const created = await n8nApi.createCredential(credential);
+    this.cache.clear();
+    return created;
   }
 
   /**
    * Update existing credential
    */
   async updateCredential(id: string, updates: Partial<N8nCredential>): Promise<N8nCredential> {
-    return await n8nApi.updateCredential(id, updates);
+    const updated = await n8nApi.updateCredential(id, updates);
+    this.cache.clear();
+    return updated;
   }
 
   /**
@@ -232,6 +247,7 @@ export class CredentialService {
     }
 
     await n8nApi.deleteCredential(id);
+    this.cache.clear();
   }
 
   /**
@@ -252,6 +268,13 @@ export class CredentialService {
     }
 
     return await credentialTestService.testCredential(credentialId, credential);
+  }
+
+  /**
+   * Clear all cache entries
+   */
+  clearCache(): void {
+    this.cache.clear();
   }
 }
 

@@ -22,7 +22,15 @@ RUN npm run build
 # --- Production Stage ---
 FROM node:20-alpine
 
+# Set labels for the image
+LABEL maintainer="duyasia"
+LABEL version="2.0.0"
+LABEL description="Full-power MCP Server for n8n"
+
 WORKDIR /app
+
+# Install production dependencies only and security tools
+RUN apk add --no-cache postgresql-client
 
 # Copy built files and production dependencies
 COPY --from=builder /app/dist ./dist
@@ -39,6 +47,10 @@ EXPOSE 3000
 
 # Entrypoint: supergateway wraps our MCP server
 ENTRYPOINT ["supergateway"]
+
+# Healthcheck to ensure the server is responding
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD nc -z localhost ${PORT} || exit 1
 
 # Default command — can be overridden in docker-compose.yml
 CMD ["--stdio", "node dist/index.js", "--port", "3000", "--outputTransport", "streamableHttp", "--streamableHttpPath", "/mcp", "--cors"]

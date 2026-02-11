@@ -24,7 +24,7 @@ import type {
  */
 export class TemplateService {
   private templateClient: AxiosInstance;
-  private cache: TemplateCache = new TemplateCache();
+  private cache: TemplateCache = new TemplateCache(3600); // 1 hour default TTL
 
   constructor() {
     this.templateClient = axios.create({

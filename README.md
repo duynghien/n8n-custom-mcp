@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔌 n8n-custom-mcp v2.0.0-alpha
+# 🔌 n8n-custom-mcp v2.0.0
 
 **Full-power MCP Server cho n8n — Dành cho AI Agent thực sự muốn _làm chủ_ workflow.**
 
@@ -22,7 +22,7 @@
 
 Các MCP Server hiện tại cho n8n (ví dụ [`czlonkowski/n8n-mcp`](https://github.com/czlonkowski/n8n-mcp)) chỉ hỗ trợ **đọc và chạy** workflow. Bạn không thể tạo mới, chỉnh sửa, xoá, hay test webhook từ AI agent.
 
-**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **23 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
+**n8n-custom-mcp** giải quyết triệt để vấn đề này bằng cách cung cấp **31 tools** bao phủ toàn bộ vòng đời quản lý workflow và credentials:
 
 | Khả năng | MCP Server khác | n8n-custom-mcp |
 |:---------|:---:|:---:|
@@ -135,7 +135,7 @@ Trong phần cấu hình MCP Plugin:
 | Type | MCP (Streamable HTTP) |
 | URL | `http://<IP-máy-chủ>:3000/mcp` |
 
-Sau khi kết nối, bạn sẽ thấy **23 tools** xuất hiện. ✅
+Sau khi kết nối, bạn sẽ thấy **31 tools** xuất hiện. ✅
 
 ## ⚙️ Cấu hình
 
@@ -162,7 +162,7 @@ supergateway \
 
 ## 💡 Sử dụng
 
-### Danh sách 23 Tools
+### Danh sách 31 Tools
 
 #### Workflow Management (12 tools)
 
@@ -192,7 +192,7 @@ supergateway \
 | `delete_credential` | Xoá credential (có safety check) |
 | `test_credential` | Test credential validity tự động |
 
-#### Template System (4 tools - NEW in v2.0-beta)
+#### Template System (4 tools)
 
 | Tool | Mô tả |
 |:-----|:------|
@@ -200,6 +200,25 @@ supergateway \
 | `get_template_details` | Lấy chi tiết JSON của một template |
 | `import_template` | Import template vào n8n với dependency resolution |
 | `export_workflow_as_template` | Export workflow thành template an toàn (đã xóa credentials) |
+
+#### Validation & Linting (5 tools)
+
+| Tool | Mô tả |
+|:-----|:------|
+| `validate_workflow_structure` | Kiểm tra lỗi cấu trúc workflow trước khi deploy |
+| `validate_workflow_credentials` | Kiểm tra credentials references và node requirements |
+| `validate_workflow_expressions` | Validate expressions JS và variable references |
+| `lint_workflow` | Linter phát hiện lỗi logic, orphaned nodes và security |
+| `suggest_workflow_improvements` | Gợi ý tối ưu hóa workflow dựa trên cấu trúc |
+
+#### Backup & Versioning (4 tools)
+
+| Tool | Mô tả |
+|:-----|:------|
+| `backup_workflow` | Tạo bản sao lưu nhanh cho workflow |
+| `list_workflow_backups` | Xem danh sách các bản sao lưu |
+| `restore_workflow` | Khôi phục workflow từ một bản backup (có auto-backup an toàn) |
+| `diff_workflow_versions` | So sánh sự khác biệt giữa 2 phiên bản workflow |
 
 ### Ví dụ: AI tự tạo workflow với credentials
 
@@ -245,7 +264,7 @@ LobeHub / OpenClaw
 │   (supergateway)     │
 │   :3000/mcp          │
 │                      │
-│   17 MCP Tools       │
+│   31 MCP Tools       │
 │   TypeScript + Axios │
 └──────────┬───────────┘
            │  REST API (nội bộ Docker)
@@ -273,6 +292,8 @@ Một vài ý tưởng:
 - [x] Thêm `search_templates` — tìm workflow mẫu từ n8n.io
 - [x] Thêm `get_credentials` — quản lý credentials qua MCP
 - [x] Thêm tool `import_workflow` / `export_workflow`
+- [x] Thêm hệ thống `Validation & Linting`
+- [x] Thêm hệ thống `Backup & Versioning`
 - [ ] Hỗ trợ SSE transport
 - [ ] Viết test cases
 

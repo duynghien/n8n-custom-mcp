@@ -70,7 +70,7 @@ describe('Expression Validator', () => {
     it('should fail on invalid variable references', () => {
       const result = validateExpression('$invalid.property');
       expect(result.valid).toBe(false);
-      expect(result.error).toBe('Invalid variable reference');
+      expect(result.error).toBe('Invalid variable reference: $invalid');
     });
 
     it('should allow expressions without variables', () => {

@@ -5,8 +5,12 @@ import type { TemplateCacheEntry } from '../types/n8n-types.js';
  */
 export class TemplateCache {
   private cache: Map<string, TemplateCacheEntry> = new Map();
-  private readonly CACHE_TTL = 3600; // 1 hour
+  private readonly defaultTtl: number;
   private readonly MAX_CACHE_SIZE = 100; // Prevent memory leak
+
+  constructor(ttlSeconds: number = 3600) {
+    this.defaultTtl = ttlSeconds;
+  }
 
   /**
    * Get data from cache if not expired
@@ -31,7 +35,7 @@ export class TemplateCache {
   /**
    * Store data in cache with TTL
    */
-  set(key: string, data: any): void {
+  set(key: string, data: any, ttl?: number): void {
     if (!key || typeof key !== 'string') {
       throw new Error('Cache key must be a non-empty string');
     }
@@ -47,7 +51,7 @@ export class TemplateCache {
     this.cache.set(key, {
       data,
       timestamp: Date.now(),
-      ttl: this.CACHE_TTL,
+      ttl: ttl ?? this.defaultTtl,
     });
   }
 

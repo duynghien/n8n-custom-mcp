@@ -45,6 +45,7 @@ vi.mock('../../services/credential-test-service.js', () => ({
 describe('CredentialService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    credentialService.clearCache();
   });
 
   describe('getSchema', () => {
