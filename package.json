@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "test:env:up": "docker compose -f docker-compose.test.yml up -d",
+    "test:env:down": "docker compose -f docker-compose.test.yml down -v",
     "build": "tsc",
     "start": "node dist/index.js"
   },
@@ -13,6 +18,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
-    "typescript": "^5.4.5"
+    "@vitest/coverage-v8": "^4.0.18",
+    "@vitest/ui": "^4.0.18",
+    "typescript": "^5.4.5",
+    "vitest": "^4.0.18"
   }
 }
