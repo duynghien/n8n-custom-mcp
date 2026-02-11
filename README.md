@@ -4,6 +4,9 @@
 
 **Full-power MCP Server cho n8n — Dành cho AI Agent thực sự muốn _làm chủ_ workflow.**
 
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](package.json)
+[![Tests](https://img.shields.io/badge/tests-194%20passed-success.svg)](src/__tests__/)
+[![Coverage](https://img.shields.io/badge/coverage-82%25-green.svg)](plans/reports/tester-260211-2000-system-validation.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-≥18-green.svg)](https://nodejs.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://docker.com/)
@@ -44,26 +47,46 @@ Các MCP Server hiện tại cho n8n (ví dụ [`czlonkowski/n8n-mcp`](https://g
 Tạo, đọc, sửa, xoá workflow hoàn toàn qua MCP — AI agent có thể tự xây dựng workflow từ đầu bằng ngôn ngữ tự nhiên.
 
 ### 🔐 Credentials Management (NEW in v2.0)
-Quản lý credentials hoàn toàn tự động:\n- Tạo, cập nhật, xoá credentials với validation\n- Liệt kê credentials từ workflows và database\n- Test credential validity tự động\n- Safety checks ngăn chặn xoá credentials đang sử dụng
+Quản lý credentials hoàn toàn tự động:
+- Tạo, cập nhật, xoá credentials với validation schema.
+- Liệt kê credentials từ workflows và database fallback.
+- Test credential validity trực tiếp từ MCP.
+- Safety checks ngăn chặn xoá credentials đang được sử dụng bởi workflows.
 
-### ✅ Workflow Validation (NEW in v2.0)
-Kiểm tra cấu trúc workflow trước khi deploy để ngăn chặn lỗi:\n- Validate cấu trúc JSON và các trường bắt buộc\n- Phát hiện duplicate node IDs/names\n- Kiểm tra node types có tồn tại trên instance\n- Validate connections giữa các nodes\n- Phát hiện circular dependencies (vòng lặp)\n- Cảnh báo missing trigger nodes cho active workflows\n- Giảm 50% thời gian debug của AI agent
+### ✅ Workflow Validation & Linting (NEW in v2.0)
+Hệ thống kiểm tra thông minh giúp AI agent tự tin hơn khi deploy:
+- **Structure**: Kiểm tra JSON, duplicate IDs, connections và circular loops.
+- **Credentials**: Xác thực mapping credentials và yêu cầu của node.
+- **Expressions**: Validate cú pháp JavaScript và biến trong biểu thức `{{ }}`.
+- **Linter**: Phát hiện orphaned nodes, hardcoded secrets và đặt tên không rõ ràng.
+- **Suggestions**: Gợi ý tối ưu hóa cấu trúc (Set nodes, Error handling, Batching).
+
+### 💾 Backup & Versioning (NEW in v2.0)
+An toàn tuyệt đối cho workflow của bạn:
+- **Auto-backup**: Tự động lưu bản sao trước khi thực hiện các thay đổi quan trọng.
+- **Versioning**: Lưu trữ tối đa 10 phiên bản cục bộ cho mỗi workflow.
+- **Restore**: Khôi phục nhanh chóng về bất kỳ phiên bản nào trong lịch sử.
+- **Diff**: So sánh sự khác biệt cấu trúc giữa các phiên bản.
 
 ### 🎯 Webhook Testing
 Tool `trigger_webhook` hỗ trợ:
-- Gọi webhook với bất kỳ HTTP method nào (GET/POST/PUT/DELETE)
-- **Test mode** (`/webhook-test/`) để debug trên n8n Editor
-- **Production mode** (`/webhook/`) cho webhook đang active
-- Custom headers & query parameters
+- Gọi webhook với đầy đủ HTTP methods (GET/POST/PUT/DELETE).
+- **Test mode** (`/webhook-test/`) để hiển thị dữ liệu trực quan trên n8n Editor.
+- **Production mode** (`/webhook/`) cho các webhook đã active.
+- Custom headers & query parameters.
 
 ### 🔍 Execution Debugging
-Theo dõi và debug workflow execution:
-- Liệt kê lịch sử chạy, lọc theo trạng thái (success/error/waiting)
-- Xem chi tiết dữ liệu đầu vào/đầu ra của từng node
-- Đọc error message cụ thể để AI tự sửa lỗi
+Theo dõi và khắc phục lỗi thời gian thực:
+- Liệt kê lịch sử chạy, lọc theo trạng thái (success/error/waiting).
+- Xem chi tiết input/output data của từng node cụ thể.
+- Đọc thông báo lỗi chi tiết để AI có thể tự sửa lỗi logic.
 
 ### 🐳 Docker-Ready
-Đóng gói sẵn Dockerfile multi-stage + [supergateway](https://github.com/nichochar/supergateway) để expose MCP qua HTTP — chỉ cần `docker compose up`.
+Đóng gói tối ưu với:
+- Multi-stage build (Node 20 Alpine).
+- Tích hợp `postgresql-client` cho DB fallback.
+- Healthcheck tự động giám sát trạng thái server.
+- [supergateway](https://github.com/nichochar/supergateway) expose MCP qua HTTP.
 
 ## 📦 Cài đặt nhanh
 
@@ -146,6 +169,17 @@ Sau khi kết nối, bạn sẽ thấy **31 tools** xuất hiện. ✅
 | `N8N_HOST` | ✅ | `http://localhost:5678` | URL đến n8n instance |
 | `N8N_API_KEY` | ✅ | — | API Key từ n8n Settings |
 | `PORT` | ❌ | `3000` | Port cho MCP HTTP endpoint |
+
+> **Ghi chú cho DB Fallback**: Để sử dụng tính năng liệt kê credentials từ database khi API bị hạn chế, hãy đảm bảo container MCP có quyền truy cập vào mạng của Postgres và cấu hình các biến `DB_POSTGRESDB_*` tương ứng.
+
+### Persistence
+
+Để lưu trữ các bản backup workflow bền vững qua các lần khởi động lại Docker, hãy mount volume cho thư mục `/app/backups`:
+
+```yaml
+volumes:
+  - ./backups:/app/backups
+```
 
 ### Supergateway Options
 
@@ -297,9 +331,16 @@ Một vài ý tưởng:
 - [ ] Hỗ trợ SSE transport
 - [ ] Viết test cases
 
+## 💡 Tài liệu chi tiết
+
+- [📖 Hướng dẫn sử dụng (USAGE.md)](docs/USAGE.md): Các kịch bản tích hợp AI Agent và n8n-skills.
+- [🛠 API Reference (API.md)](docs/API.md): Mô tả chi tiết input/output của toàn bộ 31 tools.
+- [🤝 Hướng dẫn đóng góp (CONTRIBUTING.md)](CONTRIBUTING.md): Quy trình phát triển và cấu trúc dự án.
+- [📅 Lộ trình (project-roadmap.md)](docs/project-roadmap.md): Trạng thái hoàn thiện các Phase.
+
 ## 📝 License
 
-[MIT License](LICENSE) — Sử dụng thoải mái, kể cả cho mục đích thương mại.
+[MIT License](LICENSE) — Sử dụng thoải mái cho mục đích cá nhân và thương mại.
 
 ## 🙏 Credits
 
