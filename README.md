@@ -17,7 +17,7 @@
 
 ---
 
-<img src="https://raw.githubusercontent.com/duyasia/n8n-custom-mcp/main/docs/architecture.png" alt="Architecture" width="700" />
+<img src="https://raw.githubusercontent.com/duynghien/n8n-custom-mcp/main/docs/architecture.png" alt="Architecture" width="700" />
 
 </div>
 
@@ -99,7 +99,7 @@ Theo dõi và khắc phục lỗi thời gian thực:
 ### Bước 1: Clone
 
 ```bash
-git clone https://github.com/duyasia/n8n-custom-mcp.git
+git clone https://github.com/duynghien/n8n-custom-mcp.git
 cd n8n-custom-mcp
 ```
 
@@ -355,6 +355,6 @@ Một vài ý tưởng:
 
 **Nếu thấy hữu ích, hãy ⭐ star repo để ủng hộ!**
 
-Made with ❤️ by [duyasia](https://github.com/duyasia)
+Made with ❤️ by [duynghien](https://github.com/duynghien)
 
 </div>

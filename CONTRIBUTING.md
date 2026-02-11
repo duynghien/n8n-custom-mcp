@@ -118,7 +118,7 @@ Nếu bạn muốn contribute nhưng chưa biết làm gì, đây là một số
 
 ## ❓ Câu hỏi?
 
-Mở [Issue](https://github.com/duyasia/n8n-custom-mcp/issues) trên GitHub hoặc liên hệ qua Discussion.
+Mở [Issue](https://github.com/duynghien/n8n-custom-mcp/issues) trên GitHub hoặc liên hệ qua Discussion.
 
 ---
 

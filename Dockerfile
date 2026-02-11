@@ -23,7 +23,7 @@ RUN npm run build
 FROM node:20-alpine
 
 # Set labels for the image
-LABEL maintainer="duyasia"
+LABEL maintainer="duynghien"
 LABEL version="2.0.0"
 LABEL description="Full-power MCP Server for n8n"
 
