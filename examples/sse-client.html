@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>n8n MCP SSE Client</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 2em;
+      margin-bottom: 10px;
+    }
+
+    .header p {
+      opacity: 0.9;
+      font-size: 1.1em;
+    }
+
+    .content {
+      padding: 30px;
+    }
+
+    .section {
+      margin-bottom: 30px;
+    }
+
+    .section h2 {
+      color: #667eea;
+      margin-bottom: 15px;
+      font-size: 1.5em;
+    }
+
+    .input-group {
+      margin-bottom: 15px;
+    }
+
+    .input-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .input-group input,
+    .input-group select,
+    .input-group textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.3s;
+    }
+
+    .input-group input:focus,
+    .input-group select:focus,
+    .input-group textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .input-group textarea {
+      font-family: 'Courier New', monospace;
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #333;
+    }
+
+    .btn-secondary:hover {
+      background: #e0e0e0;
+    }
+
+    .btn-danger {
+      background: #ff4757;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #ee5a6f;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .output {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+      border-radius: 6px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      max-height: 500px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .output:empty::before {
+      content: 'No output yet. Click a button to make a request.';
+      color: #888;
+      font-style: italic;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 15px;
+    }
+
+    .status.connected {
+      background: #2ecc71;
+      color: white;
+    }
+
+    .status.disconnected {
+      background: #e74c3c;
+      color: white;
+    }
+
+    .status.loading {
+      background: #f39c12;
+      color: white;
+    }
+
+    .quick-actions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .quick-action {
+      padding: 15px;
+      background: #f8f9fa;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .quick-action:hover {
+      border-color: #667eea;
+      background: #f0f4ff;
+    }
+
+    .quick-action h3 {
+      color: #667eea;
+      font-size: 1em;
+      margin-bottom: 5px;
+    }
+
+    .quick-action p {
+      color: #666;
+      font-size: 0.9em;
+    }
+
+    .error {
+      background: #fee;
+      border-left: 4px solid #e74c3c;
+      padding: 15px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      color: #c0392b;
+    }
+
+    .success {
+      background: #efe;
+      border-left: 4px solid #2ecc71;
+      padding: 15px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      color: #27ae60;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔌 n8n MCP SSE Client</h1>
+      <p>Browser-based client for testing Server-Sent Events transport</p>
+    </div>
+
+    <div class="content">
+      <!-- Connection Settings -->
+      <div class="section">
+        <h2>⚙️ Connection Settings</h2>
+        <div class="input-group">
+          <label for="baseUrl">MCP Server URL</label>
+          <input type="text" id="baseUrl" value="http://localhost:3000" placeholder="http://localhost:3000">
+        </div>
+        <div class="input-group">
+          <label for="sessionId">Session ID (optional)</label>
+          <input type="text" id="sessionId" placeholder="Leave empty for auto-generated">
+        </div>
+        <span id="status" class="status disconnected">Disconnected</span>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="section">
+        <h2>🚀 Quick Actions</h2>
+        <div class="quick-actions">
+          <div class="quick-action" onclick="listTools()">
+            <h3>📋 List Tools</h3>
+            <p>Get all available MCP tools</p>
+          </div>
+          <div class="quick-action" onclick="listWorkflows()">
+            <h3>📊 List Workflows</h3>
+            <p>Get all n8n workflows</p>
+          </div>
+          <div class="quick-action" onclick="listCredentials()">
+            <h3>🔐 List Credentials</h3>
+            <p>Get all credentials</p>
+          </div>
+          <div class="quick-action" onclick="listNodeTypes()">
+            <h3>🧩 List Node Types</h3>
+            <p>Get available node types</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom Request -->
+      <div class="section">
+        <h2>🛠️ Custom Request</h2>
+        <div class="input-group">
+          <label for="method">Method</label>
+          <select id="method">
+            <option value="tools/list">tools/list</option>
+            <option value="tools/call">tools/call</option>
+            <option value="initialize">initialize</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label for="params">Parameters (JSON)</label>
+          <textarea id="params" placeholder='{"name": "list_workflows", "arguments": {}}'>{}</textarea>
+        </div>
+        <div class="button-group">
+          <button class="btn-primary" onclick="sendCustomRequest()">Send Request</button>
+          <button class="btn-secondary" onclick="clearOutput()">Clear Output</button>
+        </div>
+      </div>
+
+      <!-- Output -->
+      <div class="section">
+        <h2>📤 Output</h2>
+        <div id="output" class="output"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let requestId = 0;
+
+    // Utility: Log to output
+    function log(message, type = 'info') {
+      const output = document.getElementById('output');
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : '📝';
+      output.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    // Utility: Clear output
+    function clearOutput() {
+      document.getElementById('output').textContent = '';
+    }
+
+    // Update status indicator
+    function setStatus(status) {
+      const statusEl = document.getElementById('status');
+      statusEl.className = `status ${status}`;
+      statusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    }
+
+    // Core: Call MCP tool via SSE
+    // Note: Using fetch() instead of EventSource API because:
+    // - EventSource doesn't support POST requests (only GET)
+    // - EventSource doesn't support custom headers (MCP-Protocol-Version, MCP-Session-Id)
+    // - fetch() with ReadableStream provides full control over the request
+    async function callMCP(method, params = {}) {
+      const baseUrl = document.getElementById('baseUrl').value;
+      const sessionId = document.getElementById('sessionId').value || `session-${Date.now()}`;
+      requestId++;
+
+      setStatus('loading');
+      log(`Sending request: ${method}`);
+
+      try {
+        const response = await fetch(`${baseUrl}/mcp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream',
+            'MCP-Session-Id': sessionId,
+            'MCP-Protocol-Version': '2024-11-05',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method,
+            params,
+            id: requestId,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorContext = {
+            timestamp: new Date().toISOString(),
+            sessionId: sessionId,
+            requestId: requestId,
+            method: method,
+            httpStatus: response.status,
+            httpStatusText: response.statusText,
+          };
+          log(`HTTP Error: ${response.status} ${response.statusText}`, 'error');
+          log(`Error context: ${JSON.stringify(errorContext, null, 2)}`);
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        // Parse SSE stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Split by double newline (SSE event delimiter)
+          const events = buffer.split('\n\n');
+          buffer = events.pop(); // Keep incomplete event in buffer
+
+          for (const event of events) {
+            if (!event.trim()) continue;
+
+            const lines = event.split('\n');
+            let eventType = 'message';
+            let data = null;
+
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                eventType = line.slice(7);
+              } else if (line.startsWith('data: ')) {
+                data = JSON.parse(line.slice(6));
+              }
+            }
+
+            if (data) {
+              setStatus('connected');
+
+              if (data.error) {
+                const errorContext = {
+                  timestamp: new Date().toISOString(),
+                  sessionId: sessionId,
+                  requestId: requestId,
+                  method: method,
+                  error: data.error,
+                };
+                log(`Error: ${data.error.message}`, 'error');
+                log(`Error context: ${JSON.stringify(errorContext, null, 2)}`);
+                log(JSON.stringify(data.error, null, 2));
+              } else {
+                log('Response received', 'success');
+                log(JSON.stringify(data.result, null, 2));
+              }
+
+              return data;
+            }
+          }
+        }
+
+        throw new Error('No response received');
+      } catch (error) {
+        setStatus('disconnected');
+        const errorContext = {
+          timestamp: new Date().toISOString(),
+          sessionId: sessionId,
+          requestId: requestId,
+          method: method,
+          error: error.message,
+        };
+        log(`Error: ${error.message}`, 'error');
+        log(`Error context: ${JSON.stringify(errorContext, null, 2)}`);
+        throw error;
+      }
+    }
+
+    // Quick Actions
+    async function listTools() {
+      try {
+        await callMCP('tools/list');
+      } catch (error) {
+        console.error('Failed to list tools:', error);
+      }
+    }
+
+    async function listWorkflows() {
+      try {
+        await callMCP('tools/call', {
+          name: 'list_workflows',
+          arguments: {},
+        });
+      } catch (error) {
+        console.error('Failed to list workflows:', error);
+      }
+    }
+
+    async function listCredentials() {
+      try {
+        await callMCP('tools/call', {
+          name: 'list_credentials',
+          arguments: {},
+        });
+      } catch (error) {
+        console.error('Failed to list credentials:', error);
+      }
+    }
+
+    async function listNodeTypes() {
+      try {
+        await callMCP('tools/call', {
+          name: 'list_node_types',
+          arguments: {},
+        });
+      } catch (error) {
+        console.error('Failed to list node types:', error);
+      }
+    }
+
+    // Custom Request
+    async function sendCustomRequest() {
+      const method = document.getElementById('method').value;
+      const paramsText = document.getElementById('params').value;
+
+      try {
+        const params = JSON.parse(paramsText);
+        await callMCP(method, params);
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          log('Invalid JSON in parameters', 'error');
+        } else {
+          console.error('Failed to send request:', error);
+        }
+      }
+    }
+
+    // Initialize
+    log('SSE Client initialized. Ready to connect.');
+    log('Click a quick action or send a custom request to start.');
+  </script>
+</body>
+</html>
