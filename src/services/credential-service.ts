@@ -5,6 +5,29 @@ import { TemplateCache } from '../utils/template-cache.js';
 import type { N8nCredential, N8nCredentialSchema } from '../types/n8n-types.js';
 
 /**
+ * Recursively sanitize object to prevent prototype pollution
+ * Removes __proto__, constructor, prototype keys at all levels
+ */
+function sanitizeObject(obj: any): any {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeObject(item));
+  }
+
+  const sanitized = Object.create(null);
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue; // Skip dangerous keys
+    }
+    sanitized[key] = sanitizeObject(value); // Recursive
+  }
+  return sanitized;
+}
+
+/**
  * Service class for n8n credential management
  * Handles credential CRUD, validation, testing, and usage tracking
  */
@@ -161,6 +184,19 @@ export class CredentialService {
     const schema = await this.getSchema(type);
     const errors: string[] = [];
 
+    // Protect against prototype pollution in credential data
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    for (const key of dangerousKeys) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        errors.push(`Invalid credential data key: ${key}`);
+      }
+    }
+
+    // Early return if dangerous keys found
+    if (errors.length > 0) {
+      return { valid: false, errors };
+    }
+
     // Check required fields
     for (const prop of schema.properties) {
       if (prop.required && data[prop.name] === undefined) {
@@ -193,6 +229,18 @@ export class CredentialService {
    * Warns if duplicate name exists (n8n allows duplicates)
    */
   async createCredential(credential: N8nCredential): Promise<N8nCredential> {
+    // Sanitize credential data before validation
+    if (credential.data) {
+      const sanitized = Object.create(null);
+      for (const [key, value] of Object.entries(credential.data)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+          throw new Error(`Invalid credential data key: ${key}`);
+        }
+        sanitized[key] = value;
+      }
+      credential.data = sanitized;
+    }
+
     // Validate data against schema
     const validation = await this.validateCredentialData(
       credential.type,
@@ -222,6 +270,18 @@ export class CredentialService {
    * Update existing credential
    */
   async updateCredential(id: string, updates: Partial<N8nCredential>): Promise<N8nCredential> {
+    // Sanitize credential data if present in updates
+    if (updates.data) {
+      const sanitized = Object.create(null);
+      for (const [key, value] of Object.entries(updates.data)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+          throw new Error(`Invalid credential data key: ${key}`);
+        }
+        sanitized[key] = value;
+      }
+      updates.data = sanitized;
+    }
+
     // Verify credential exists first
     const credentials = await this.listCredentials();
     const exists = credentials.some(c => c.id === id);

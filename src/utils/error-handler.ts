@@ -100,11 +100,43 @@ export function validateRequired(
   params: Record<string, any>,
   required: string[]
 ): void {
-  const missing = required.filter(key => params[key] === undefined || params[key] === null);
+  // Protect against prototype pollution
+  const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+  for (const key of dangerousKeys) {
+    if (Object.prototype.hasOwnProperty.call(params, key)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid parameter key: ${key}`
+      );
+    }
+  }
+
+  // Use hasOwnProperty to safely check for required keys
+  const missing = required.filter(key =>
+    !Object.prototype.hasOwnProperty.call(params, key) ||
+    params[key] === undefined ||
+    params[key] === null
+  );
+
   if (missing.length > 0) {
     throw new McpError(
       ErrorCode.InvalidParams,
       `Missing required parameters: ${missing.join(', ')}`
     );
   }
+}
+
+/**
+ * Create a safe object without prototype chain
+ * Use for user-provided data to prevent prototype pollution
+ */
+export function createSafeObject<T = any>(data: Record<string, any>): T {
+  const safe = Object.create(null);
+  for (const [key, value] of Object.entries(data)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue; // Skip dangerous keys
+    }
+    safe[key] = value;
+  }
+  return safe;
 }

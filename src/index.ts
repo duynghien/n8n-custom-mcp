@@ -20,6 +20,24 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
 
+// JSON-RPC 2.0 request interface
+interface JsonRpcRequest {
+  jsonrpc?: string;
+  method: string;
+  params?: any;
+  id?: string | number | null;
+}
+
+// Type guard for JSON-RPC request
+function isValidJsonRpcRequest(body: any): body is JsonRpcRequest {
+  return (
+    body &&
+    typeof body === 'object' &&
+    typeof body.method === 'string' &&
+    (body.id === undefined || typeof body.id === 'string' || typeof body.id === 'number' || body.id === null)
+  );
+}
+
 const allTools = [
   ...workflowTools,
   ...credentialTools,
@@ -97,6 +115,22 @@ async function main() {
     app.use(cors());
     app.use(express.json());
 
+    // JSON parsing error handler
+    app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (err instanceof SyntaxError && 'body' in err) {
+        console.error('JSON parsing error:', err.message);
+        return res.status(400).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32700,
+            message: 'Parse error: Invalid JSON'
+          },
+          id: null
+        });
+      }
+      next();
+    });
+
     // Logging middleware
     app.use((req, res, next) => {
       console.error(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -108,6 +142,13 @@ async function main() {
 
     const sessions = new Map<string, SSEServerTransport>();
 
+    // Session metrics for monitoring
+    const sessionMetrics = {
+      totalSessions: 0,
+      collisions: 0,
+      activeSessions: () => sessions.size
+    };
+
     // Standard SSE GET handler
     app.get('/mcp', async (req, res) => {
       const server = createMcpServer();
@@ -116,25 +157,74 @@ async function main() {
 
       const sessionId = transport.sessionId;
       if (sessionId) {
+        // Check for session collision
+        if (sessions.has(sessionId)) {
+          sessionMetrics.collisions++;
+          console.error(`⚠️ Session ID collision detected: ${sessionId} (total collisions: ${sessionMetrics.collisions})`);
+
+          // Force cleanup of old session
+          const oldTransport = sessions.get(sessionId);
+          if (oldTransport) {
+            try {
+              oldTransport.close();
+            } catch (err) {
+              console.error('Error closing old transport:', err);
+            }
+          }
+          sessions.delete(sessionId);
+
+          // Log security event with timestamp
+          console.error(`[SECURITY] ${new Date().toISOString()} - Session ${sessionId} replaced. Old session terminated.`);
+        }
+
+        sessionMetrics.totalSessions++;
         sessions.set(sessionId, transport);
-        transport.onclose = () => sessions.delete(sessionId);
+        transport.onclose = () => {
+          sessions.delete(sessionId);
+          console.error(`Session ${sessionId} closed`);
+        };
       }
     });
 
     // Standard Message handler
     app.post('/message', async (req, res) => {
       const sessionId = req.query.sessionId as string;
+
+      // Validate sessionId format (UUID v4)
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!sessionId || !uuidRegex.test(sessionId)) {
+        console.error(`Invalid session ID format: ${sessionId}`);
+        return res.status(400).json({
+          error: 'Invalid session ID format'
+        });
+      }
+
       const transport = sessions.get(sessionId);
       if (transport) {
         await transport.handlePostMessage(req, res);
       } else {
-        res.status(404).send('Session not found');
+        console.error(`Session not found: ${sessionId}`);
+        res.status(404).json({
+          error: 'Session not found or expired'
+        });
       }
     });
 
     // 🚀 Hybrid "Streamable HTTP" handler for LobeHub compatibility
     // Handles POST /mcp directly by returning a single-event SSE stream
     app.post('/mcp', async (req, res) => {
+      // Validate JSON-RPC request format
+      if (!isValidJsonRpcRequest(req.body)) {
+        return res.status(400).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32600,
+            message: 'Invalid Request: Request must be a valid JSON-RPC 2.0 object'
+          },
+          id: null
+        });
+      }
+
       const { method, id } = req.body;
 
       res.setHeader('Content-Type', 'text/event-stream');
@@ -177,6 +267,18 @@ async function main() {
         transport: 'sse/hybrid',
         tools_count: allTools.length,
         endpoints: ['GET /mcp', 'POST /message', 'POST /mcp']
+      });
+    });
+
+    app.get('/metrics', (req, res) => {
+      res.json({
+        sessions: {
+          active: sessionMetrics.activeSessions(),
+          total: sessionMetrics.totalSessions,
+          collisions: sessionMetrics.collisions
+        },
+        uptime: process.uptime(),
+        memory: process.memoryUsage()
       });
     });
 

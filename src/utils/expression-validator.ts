@@ -64,7 +64,25 @@ export function validateExpression(expression: string): {
     return { valid: false, error: 'Invalid variable reference' };
   }
 
-  // 4. Check for balanced parentheses
+  // 4. Check for dangerous functions that could execute arbitrary code
+  const dangerousFunctions = /\b(eval|Function|setTimeout|setInterval|setImmediate)\s*\(/;
+  if (dangerousFunctions.test(expression)) {
+    return {
+      valid: false,
+      error: 'Expression contains dangerous function (eval, Function, setTimeout, setInterval, setImmediate)'
+    };
+  }
+
+  // 5. Check for constructor access patterns
+  const constructorAccess = /\.constructor\s*\(|\.constructor\s*\[/;
+  if (constructorAccess.test(expression)) {
+    return {
+      valid: false,
+      error: 'Direct constructor access is not allowed'
+    };
+  }
+
+  // 6. Check for balanced parentheses
   let parenCount = 0;
   for (const char of expression) {
     if (char === '(') parenCount++;
@@ -77,7 +95,7 @@ export function validateExpression(expression: string): {
     return { valid: false, error: 'Unbalanced parentheses' };
   }
 
-  // 5. Check for valid variable references
+  // 7. Check for valid variable references
   const varRegex = /\$(json|node|vars|parameter|now|today|workflow|execution|input|binary|env|prevNode|self)/;
   if (expression.includes('$') && !varRegex.test(expression)) {
     // Basic check for common mistakes like $jsn instead of $json
@@ -91,7 +109,7 @@ export function validateExpression(expression: string): {
     }
   }
 
-  // 6. Validate JS syntax using vm.Script (without executing)
+  // 8. Validate JS syntax using vm.Script (without executing)
   try {
     // Replace n8n specific variables with placeholders to allow JS syntax validation
     const sanitizedExpr = expression.replace(/\$(json|node|vars|parameter|now|today|workflow|execution|input|binary|env|prevNode|self)/g, '___V');

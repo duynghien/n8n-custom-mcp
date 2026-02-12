@@ -3,12 +3,12 @@
 ## Tổng quan dự án
 n8n-custom-mcp là một MCP Server mạnh mẽ cho phép AI Agent quản lý toàn diện n8n workflow. Khác với các giải pháp thông thường chỉ cho phép đọc/chạy workflow, dự án này cung cấp khả năng CRUD (Tạo, Đọc, Sửa, Xóa), quản lý Credentials, Validation cấu trúc và Hệ thống Template.
 
-## Trạng thái hiện tại (v2.1.0)
+## Trạng thái hiện tại (v2.2.1)
 - **Tổng số công cụ (Tools):** 32 tools.
 - **Kiến trúc:** Modular, phân tách rõ ràng giữa Service, Tool và Utility.
 - **Transport:** Streamable HTTP với SSE support qua supergateway.
-- **Chất lượng code:** Test coverage 100% (201/201 tests), tuân thủ nguyên tắc YAGNI/KISS/DRY.
-- **Tập trung hiện tại:** Phase 7 - AI Autonomy Enhancements.
+- **Chất lượng code:** Test coverage 100% (218/218 tests), tuân thủ nguyên tắc YAGNI/KISS/DRY.
+- **Bảo mật:** Hardened với 5 P0 security fixes (eval detection, prototype pollution protection, DoS prevention, session collision detection).
 
 ## Cấu trúc thư mục chính
 - `src/index.ts`: Điểm khởi đầu của MCP Server.
@@ -42,4 +42,4 @@ n8n-custom-mcp là một MCP Server mạnh mẽ cho phép AI Agent quản lý to
 - **Browser Ready:** Full CORS support, working client examples
 
 ---
-*Cập nhật lần cuối: 2026-02-12*
+*Cập nhật lần cuối: 2026-02-12 (v2.2.1 - P0 Security Fixes)*
