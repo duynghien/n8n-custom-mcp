@@ -5,10 +5,35 @@ import { AxiosError } from 'axios';
  * Convert axios error to standardized MCP error
  * Sanitizes error message to prevent sensitive data leakage
  */
+/**
+ * Extract error message from API response
+ * Handles both JSON and HTML responses (e.g., from reverse proxies)
+ */
+function extractErrorMessage(data: unknown, fallbackMessage: string): string {
+  // Handle JSON response with message property
+  if (data && typeof data === 'object' && 'message' in data) {
+    return String(data.message);
+  }
+
+  // Handle HTML response (e.g., 502/503 from reverse proxy)
+  if (typeof data === 'string') {
+    // Try to extract <title> tag for a cleaner message
+    const titleMatch = data.match(/<title>([^<]*)<\/title>/i);
+    if (titleMatch && titleMatch[1]) {
+      return `${titleMatch[1].trim()} (HTML response)`;
+    }
+    // Return truncated HTML if no title found
+    const truncated = data.slice(0, 100).replace(/\s+/g, ' ').trim();
+    return truncated.length > 0 ? `${truncated}... (HTML response)` : 'Server returned HTML error page';
+  }
+
+  return fallbackMessage;
+}
+
 export function handleApiError(error: unknown, context: string): McpError {
   if (error instanceof AxiosError) {
     const status = error.response?.status;
-    let message = error.response?.data?.message || error.message;
+    let message = extractErrorMessage(error.response?.data, error.message);
 
     // Basic sanitization: remove potential tokens/keys from message
     message = message.replace(/([a-zA-Z0-9]{32,})/g, '[REDACTED]');

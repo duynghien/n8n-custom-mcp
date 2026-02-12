@@ -213,7 +213,17 @@ export class BackupService {
       for (const backup of toDelete) {
         const { timestamp, nonce } = this.parseBackupId(backup.backupId);
         const filePath = path.join(workflowDir, `${timestamp}_${nonce}.json`);
-        await fs.unlink(filePath);
+        try {
+          await fs.unlink(filePath);
+        } catch (error: any) {
+          // Handle locked/busy files gracefully
+          if (error.code === 'EPERM' || error.code === 'EBUSY') {
+            console.warn(`Skipping locked backup file: ${filePath}`);
+            continue;
+          }
+          // Log other errors but continue rotation
+          console.warn(`Failed to delete backup file ${filePath}:`, error.message);
+        }
       }
     } catch (error) {
       console.error('Failed to rotate backups:', error);
@@ -253,16 +263,33 @@ export class BackupService {
     try {
       const estimatedSize = JSON.stringify(workflow).length * 1.2; // +20% buffer
 
-      // Check available space via statfs
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const execAsync = promisify(exec);
+      let availableBytes = 0;
 
-      const { stdout } = await execAsync(`df -k "${this.backupRoot}" | tail -1 | awk '{print $4}'`);
-      const availableKB = parseInt(stdout.trim(), 10);
-      const availableBytes = availableKB * 1024;
+      // Try fs.statfs first (Node.js 18.15+, cross-platform)
+      try {
+        const statfs = await fs.statfs(this.backupRoot);
+        // statfs returns block size and available blocks
+        availableBytes = statfs.bavail * statfs.bsize;
+      } catch {
+        // Fallback to df command on Unix systems
+        try {
+          const { exec } = await import('child_process');
+          const { promisify } = await import('util');
+          const execAsync = promisify(exec);
 
-      if (availableBytes < estimatedSize + 100 * 1024 * 1024) {
+          const { stdout } = await execAsync(`df -k "${this.backupRoot}" | tail -1 | awk '{print $4}'`);
+          const availableKB = parseInt(stdout.trim(), 10);
+          if (!isNaN(availableKB)) {
+            availableBytes = availableKB * 1024;
+          }
+        } catch {
+          // Could not determine disk space, skip check
+          console.warn('Could not determine available disk space, skipping check');
+          return;
+        }
+      }
+
+      if (availableBytes > 0 && availableBytes < estimatedSize + 100 * 1024 * 1024) {
         // Keep 100MB free
         throw new Error('Insufficient disk space for backup');
       }

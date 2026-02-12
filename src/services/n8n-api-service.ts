@@ -75,8 +75,31 @@ export class N8nApiService {
     }
   }
 
+  private validateWorkflowUpdate(workflow: Partial<N8nWorkflow>): void {
+    // Validate nodes array if provided
+    if (workflow.nodes !== undefined) {
+      if (!Array.isArray(workflow.nodes)) {
+        throw new Error('Workflow nodes must be an array');
+      }
+      if (workflow.nodes.length === 0) {
+        throw new Error('Workflow nodes array cannot be empty');
+      }
+    }
+
+    // Validate name if provided
+    if (workflow.name !== undefined && typeof workflow.name !== 'string') {
+      throw new Error('Workflow name must be a string');
+    }
+
+    // Validate connections if provided
+    if (workflow.connections !== undefined && typeof workflow.connections !== 'object') {
+      throw new Error('Workflow connections must be an object');
+    }
+  }
+
   async updateWorkflow(id: string, workflow: Partial<N8nWorkflow>): Promise<N8nWorkflow> {
     this.validateWorkflowId(id);
+    this.validateWorkflowUpdate(workflow);
     try {
       const response = await n8nClient.put(`/workflows/${id}`, workflow);
       return response.data;
