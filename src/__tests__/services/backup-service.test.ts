@@ -17,6 +17,7 @@ vi.mock('fs', async () => {
       readdir: vi.fn(),
       access: vi.fn(),
       stat: vi.fn(),
+      lstat: vi.fn(),
       unlink: vi.fn(),
     },
   };
@@ -41,6 +42,12 @@ describe('BackupService', () => {
   beforeEach(() => {
     service = new BackupService(backupRoot);
     vi.clearAllMocks();
+    // Mock lstat to return file/directory stats
+    vi.mocked(fs.lstat).mockResolvedValue({
+      isSymbolicLink: () => false,
+      isFile: () => true,
+      isDirectory: () => false,
+    } as any);
   });
 
   describe('backupWorkflow', () => {
