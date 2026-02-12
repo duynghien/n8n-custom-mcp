@@ -1,11 +1,11 @@
 <div align="center">
 
-# 🔌 n8n-custom-mcp v2.0.0
+# 🔌 n8n-custom-mcp v2.1.0
 
 **Full-power MCP Server cho n8n — Dành cho AI Agent thực sự muốn _làm chủ_ workflow.**
 
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-194%20passed-success.svg)](src/__tests__/)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](package.json)
+[![Tests](https://img.shields.io/badge/tests-201%20passed-success.svg)](src/__tests__/)
 [![Coverage](https://img.shields.io/badge/coverage-82%25-green.svg)](plans/reports/tester-260211-2000-system-validation.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-≥18-green.svg)](https://nodejs.org/)
