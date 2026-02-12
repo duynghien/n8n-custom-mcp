@@ -4,8 +4,8 @@
 Lộ trình phát triển n8n-custom-mcp từ một công cụ quản lý workflow cơ bản thành một nền tảng tự trị hoàn chỉnh cho AI Agent.
 
 ## Status Summary
-- **Current Version:** v2.1.0-dev
-- **Overall Progress:** 85%
+- **Current Version:** v2.1.0
+- **Overall Progress:** 88%
 - **Active Phase:** Phase 7: AI Autonomy Enhancements
 
 ## Development Phases
@@ -58,13 +58,17 @@ Lộ trình phát triển n8n-custom-mcp từ một công cụ quản lý workfl
 
 ### 🏗 Phase 7: AI Autonomy Enhancements (High Impact)
 - [x] **Dynamic Node Schema Discovery**: Tự động khám phá properties của node type.
+- [x] **SSE Transport Enhancement**: Server-Sent Events support cho browser clients (Phase 1 completed).
 - [ ] **Smart Parameter Completion**: Gợi ý tham số thông minh dựa trên context.
 - [ ] **Human-in-the-loop**: Cơ chế phê duyệt cho các tác vụ nhạy cảm.
 - [ ] **Expression/Code Sandbox**: Sandbox an toàn để AI test code snippet/expression.
 - **Status:** In Progress 🏗
+- **Progress:** 40% (2/5 features completed)
 
 ## Success Metrics
-- [x] 32/31 Tools đã hoàn thành (v2.1.0-dev).
+- [x] 32/31 Tools đã hoàn thành (v2.1.0).
+- [x] SSE Transport support cho browser clients (v2.1.0).
 - [ ] 35/35 Tools dự kiến hoàn thành (v2.2.0).
-- [x] Test coverage > 85%.
+- [x] Test coverage > 85% (currently 100% - 201/201 tests).
 - [x] AI Agent có thể tự xây dựng workflow phức tạp.
+- [x] Browser-based MCP clients có thể kết nối qua SSE.

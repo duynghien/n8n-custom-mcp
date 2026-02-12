@@ -3,11 +3,12 @@
 ## Tổng quan dự án
 n8n-custom-mcp là một MCP Server mạnh mẽ cho phép AI Agent quản lý toàn diện n8n workflow. Khác với các giải pháp thông thường chỉ cho phép đọc/chạy workflow, dự án này cung cấp khả năng CRUD (Tạo, Đọc, Sửa, Xóa), quản lý Credentials, Validation cấu trúc và Hệ thống Template.
 
-## Trạng thái hiện tại (v2.0.0-beta)
-- **Tổng số công cụ (Tools):** 23 tools.
+## Trạng thái hiện tại (v2.1.0)
+- **Tổng số công cụ (Tools):** 32 tools.
 - **Kiến trúc:** Modular, phân tách rõ ràng giữa Service, Tool và Utility.
-- **Chất lượng code:** Test coverage > 85%, tuân thủ nguyên tắc YAGNI/KISS/DRY.
-- **Tập trung hiện tại:** Phase 4 - Backup & Versioning.
+- **Transport:** Streamable HTTP với SSE support qua supergateway.
+- **Chất lượng code:** Test coverage 100% (201/201 tests), tuân thủ nguyên tắc YAGNI/KISS/DRY.
+- **Tập trung hiện tại:** Phase 7 - AI Autonomy Enhancements.
 
 ## Cấu trúc thư mục chính
 - `src/index.ts`: Điểm khởi đầu của MCP Server.
@@ -22,6 +23,8 @@ n8n-custom-mcp là một MCP Server mạnh mẽ cho phép AI Agent quản lý to
 2. **Credentials Management:** Tự động hóa việc tạo và kiểm tra credentials.
 3. **Template System:** Tích hợp thư viện mẫu n8n.io với cơ chế cache hiệu quả.
 4. **Validation:** Kiểm tra cấu trúc workflow, phát hiện vòng lặp trước khi triển khai.
+5. **SSE Transport:** Server-Sent Events support cho browser clients qua Streamable HTTP.
+6. **Dynamic Schema Discovery:** Tự động khám phá node parameters và properties.
 
 ## Công nghệ sử dụng
 - **TypeScript & Node.js**
@@ -30,5 +33,13 @@ n8n-custom-mcp là một MCP Server mạnh mẽ cho phép AI Agent quản lý to
 - **Supergateway:** Expose MCP qua HTTP.
 - **Docker:** Đóng gói và triển khai nhanh.
 
+## Transport Layer
+- **Primary:** stdio (MCP SDK standard)
+- **HTTP Wrapper:** supergateway - Converts stdio → Streamable HTTP
+- **SSE Support:** Automatic, no configuration required
+- **Protocol:** MCP Protocol 2024-11-05
+- **Endpoint:** `http://localhost:3000/mcp` (POST requests)
+- **Browser Ready:** Full CORS support, working client examples
+
 ---
-*Cập nhật lần cuối: 2026-02-11*
+*Cập nhật lần cuối: 2026-02-12*

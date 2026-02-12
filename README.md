@@ -311,12 +311,101 @@ LobeHub / OpenClaw
 └──────────────────────┘
 ```
 
+## 🌐 SSE Transport Support (NEW in v2.1)
+
+Server hỗ trợ **Server-Sent Events (SSE)** transport thông qua supergateway, cho phép browser và HTTP clients kết nối trực tiếp:
+
+### Tính năng SSE
+
+- ✅ **Real-time streaming**: Nhận responses qua SSE events
+- ✅ **Browser compatible**: Sử dụng EventSource API hoặc fetch()
+- ✅ **CORS enabled**: Browser clients có thể connect từ bất kỳ origin nào
+- ✅ **Session management**: Hỗ trợ custom headers (MCP-Session-Id)
+- ✅ **Keep-alive connections**: Persistent connections cho long-running operations
+
+### Quick Start với SSE
+
+**Browser Client (fetch API)**:
+```javascript
+const response = await fetch('http://localhost:3000/mcp', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+  },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'tools/list',
+    id: 1,
+  }),
+});
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  const chunk = decoder.decode(value);
+  // Parse SSE format: "event: message\ndata: {...}\n\n"
+  const lines = chunk.split('\n');
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      const data = JSON.parse(line.slice(6));
+      console.log('Received:', data);
+    }
+  }
+}
+```
+
+**Node.js Client**:
+```javascript
+const EventSource = require('eventsource');
+
+// Note: EventSource chỉ hỗ trợ GET, dùng fetch() cho POST requests
+const response = await fetch('http://localhost:3000/mcp', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+  },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'list_workflows',
+    id: 1,
+  }),
+});
+
+// Process SSE stream
+for await (const chunk of response.body) {
+  const text = chunk.toString();
+  // Parse SSE events...
+}
+```
+
+**cURL Testing**:
+```bash
+curl -N -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+```
+
+### Chi tiết
+
+- 📖 [SSE Integration Guide](docs/sse-integration-guide.md): Hướng dẫn tích hợp chi tiết
+- 🏗️ [System Architecture](docs/system-architecture.md): Kiến trúc SSE transport layer
+- 🔧 [Troubleshooting SSE](docs/troubleshooting-sse.md): Xử lý lỗi thường gặp
+- 💻 [Example Clients](examples/): Browser và Node.js client examples
+
 ## 🔒 Bảo mật
 
 - ⚠️ **KHÔNG bao giờ** hardcode API Key trong source code
 - File `.env` đã được thêm vào `.gitignore`
 - MCP server giao tiếp với n8n qua mạng Docker nội bộ
 - Webhook client **không** gửi API Key (mô phỏng request từ bên ngoài)
+- SSE endpoint không có authentication (chỉ dùng cho internal/local development)
 
 ## 🤝 Đóng góp
 
@@ -328,7 +417,7 @@ Một vài ý tưởng:
 - [x] Thêm tool `import_workflow` / `export_workflow`
 - [x] Thêm hệ thống `Validation & Linting`
 - [x] Thêm hệ thống `Backup & Versioning`
-- [ ] Hỗ trợ SSE transport
+- [x] Hỗ trợ SSE transport
 - [ ] Viết test cases
 
 ## 💡 Tài liệu chi tiết
