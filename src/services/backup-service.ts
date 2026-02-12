@@ -1,8 +1,12 @@
 import { promises as fs } from 'fs';
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
+import { Readable } from 'stream';
 import path from 'path';
 import crypto from 'crypto';
 import { n8nApi } from './n8n-api-service.js';
 import { handleApiError } from '../utils/error-handler.js';
+import { validateSafePath, estimateJsonSize, SIZE_LIMITS } from '../utils/file-system-safety.js';
 import type { N8nWorkflow } from '../types/n8n-types.js';
 
 interface BackupMetadata {
@@ -33,6 +37,20 @@ export class BackupService {
   }
 
   /**
+   * Stream-write large JSON to file
+   */
+  private async streamWriteJson(
+    filePath: string,
+    data: any
+  ): Promise<void> {
+    const jsonString = JSON.stringify(data, null, 2);
+    const readable = Readable.from([jsonString]);
+    const writable = createWriteStream(filePath);
+
+    await pipeline(readable, writable);
+  }
+
+  /**
    * Create backup snapshot of workflow
    */
   async backupWorkflow(
@@ -46,6 +64,23 @@ export class BackupService {
       // Fetch workflow from n8n
       const workflow = await n8nApi.getWorkflow(workflowId);
 
+      // Estimate size before processing
+      const estimatedSize = estimateJsonSize(workflow);
+
+      if (estimatedSize > SIZE_LIMITS.HARD_LIMIT) {
+        throw new Error(
+          `Workflow too large for backup: ~${Math.round(estimatedSize / 1024 / 1024)}MB ` +
+          `(limit: ${SIZE_LIMITS.HARD_LIMIT / 1024 / 1024}MB)`
+        );
+      }
+
+      if (estimatedSize > SIZE_LIMITS.WARN_THRESHOLD) {
+        console.warn(
+          `Large workflow detected: ~${Math.round(estimatedSize / 1024 / 1024)}MB. ` +
+          `Using streaming write.`
+        );
+      }
+
       // Check disk space before backup
       await this.checkDiskSpace(workflow);
 
@@ -56,10 +91,23 @@ export class BackupService {
 
       // Prepare storage paths
       const workflowDir = path.join(this.backupRoot, sanitizedId);
+
+      // Validate path safety (symlink check)
+      const pathCheck = await validateSafePath(workflowDir, this.backupRoot);
+      if (!pathCheck.safe) {
+        throw new Error(`Unsafe backup path: ${pathCheck.reason}`);
+      }
+
       await fs.mkdir(workflowDir, { recursive: true });
 
       const backupPath = path.join(workflowDir, `${timestamp}_${nonce}.json`);
       const tempPath = `${backupPath}.tmp`;
+
+      // Validate backup file path
+      const filePathCheck = await validateSafePath(tempPath, this.backupRoot);
+      if (!filePathCheck.safe) {
+        throw new Error(`Unsafe backup file path: ${filePathCheck.reason}`);
+      }
 
       // Save backup
       const backupData = {
@@ -73,8 +121,13 @@ export class BackupService {
         workflow,
       };
 
-      // Atomic write: temp file -> rename
-      await fs.writeFile(tempPath, JSON.stringify(backupData, null, 2), 'utf-8');
+      // Use streaming for large workflows
+      if (estimatedSize > SIZE_LIMITS.STREAM_THRESHOLD) {
+        await this.streamWriteJson(tempPath, backupData);
+      } else {
+        await fs.writeFile(tempPath, JSON.stringify(backupData, null, 2), 'utf-8');
+      }
+
       await fs.rename(tempPath, backupPath);
 
       // Rotate old backups

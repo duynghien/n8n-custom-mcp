@@ -16,6 +16,8 @@ import { backupTools, handleBackupTool } from './tools/backup-tools.js';
 import { nodeTools, handleNodeTool } from './tools/node-tools.js';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { createRequire } from 'module';
+import { safeStringify } from './utils/safe-json.js';
+import { limitResponse, RESPONSE_LIMITS } from './utils/response-limiter.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
@@ -90,8 +92,30 @@ function createMcpServer() {
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
       }
 
+      // Apply response size limiting
+      const limited = limitResponse(result, RESPONSE_LIMITS.MAX_RESPONSE_SIZE);
+
+      if (limited.truncated) {
+        console.warn(
+          `Response truncated for tool ${name}: ` +
+          `${Math.round(limited.originalSize / 1024)}KB → ${Math.round(limited.truncatedSize / 1024)}KB`
+        );
+      }
+
+      // Build response with pagination info if truncated
+      const responseData = limited.truncated
+        ? {
+            ...limited.data,
+            _meta: {
+              truncated: true,
+              originalSize: limited.originalSize,
+              pagination: limited.pagination,
+            },
+          }
+        : limited.data;
+
       return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        content: [{ type: 'text', text: safeStringify(responseData) }],
       };
     } catch (error) {
       console.error(`Tool error (${name}):`, error);

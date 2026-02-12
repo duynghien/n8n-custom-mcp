@@ -293,8 +293,8 @@ describe('validateConnections', () => {
     };
 
     const errors = validateConnections(connections, nodeIds);
-    expect(errors).toHaveLength(1); // Should report invalid structure
-    expect(errors[0].message).toContain('Invalid connection structure');
+    expect(errors).toHaveLength(1); // Should report invalid index (missing index field)
+    expect(errors[0].message).toContain('Invalid connection index');
   });
 
   it('should validate complex nested connection structure', () => {

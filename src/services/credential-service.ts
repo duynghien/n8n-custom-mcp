@@ -2,6 +2,7 @@ import { n8nApi } from './n8n-api-service.js';
 import { credentialTestService } from './credential-test-service.js';
 import { handleApiError } from '../utils/error-handler.js';
 import { TemplateCache } from '../utils/template-cache.js';
+import { credentialLockManager } from '../utils/credential-lock-manager.js';
 import type { N8nCredential, N8nCredentialSchema } from '../types/n8n-types.js';
 
 /**
@@ -326,6 +327,15 @@ export class CredentialService {
    * @param force Skip in-use check
    */
   async deleteCredential(id: string, force: boolean = false): Promise<void> {
+    // Check if credential is locked by active execution
+    if (!force && credentialLockManager.isLocked(id)) {
+      const holders = credentialLockManager.getLockHolders(id);
+      throw new Error(
+        `Credential is locked by ${holders.length} active execution(s): ${holders.join(', ')}. ` +
+        `Use force=true to delete anyway (may cause execution failures).`
+      );
+    }
+
     if (!force) {
       const usedBy = await this.getCredentialUsage(id);
       if (usedBy.length > 0) {
