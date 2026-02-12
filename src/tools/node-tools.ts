@@ -6,9 +6,16 @@ export const nodeTools = [
   {
     name: 'get_node_schema',
     description: 'Get the parameter schema for a specific n8n node type. Use this to understand what inputs/options a node accepts.',
-    inputSchema: z.object({
-      nodeName: z.string().describe('The internal name of the node (e.g., "n8n-nodes-base.httpRequest", "n8n-nodes-base.googleSheets")'),
-    }),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodeName: {
+          type: 'string',
+          description: 'The internal name of the node (e.g., "n8n-nodes-base.httpRequest", "n8n-nodes-base.googleSheets")',
+        },
+      },
+      required: ['nodeName'],
+    },
   },
 ];
 

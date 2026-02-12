@@ -14,12 +14,8 @@ services:
     environment:
       - N8N_HOST=${N8N_HOST:-http://localhost:5678}
       - N8N_API_KEY=${N8N_API_KEY}
+      - MCP_TRANSPORT=sse
+      - PORT=3000
     volumes:
       - ./backups:/app/backups
-    # Override CMD nếu cần tuỳ chỉnh
-    command: >
-      --stdio "node dist/index.js"
-      --port 3000
-      --outputTransport streamableHttp
-      --streamableHttpPath /mcp
-      --cors
+    command: node dist/index.js
