@@ -9,7 +9,7 @@ import type { N8nCredential, N8nCredentialSchema } from '../types/n8n-types.js';
  * Handles credential CRUD, validation, testing, and usage tracking
  */
 export class CredentialService {
-  private cache: TemplateCache = new TemplateCache(30); // 30s cache for credentials
+  private cache: TemplateCache = new TemplateCache(5); // 5s cache for credentials (sensitive data)
   /**
    * Get schema for credential type
    * @throws McpError if credential type not found
@@ -102,9 +102,9 @@ export class CredentialService {
    * @private
    */
   private async listFromDatabase(): Promise<N8nCredential[]> {
-    const { exec } = await import('child_process');
+    const { execFile } = await import('child_process');
     const { promisify } = await import('util');
-    const execAsync = promisify(exec);
+    const execFileAsync = promisify(execFile);
 
     const dbHost = process.env.DB_POSTGRESDB_HOST || 'localhost';
     const dbPort = process.env.DB_POSTGRESDB_PORT || '5432';
@@ -112,13 +112,31 @@ export class CredentialService {
     const dbUser = process.env.DB_POSTGRESDB_USER || 'n8n';
     const dbPassword = process.env.DB_POSTGRESDB_PASSWORD || '';
 
-    // Basic sanitization for shell command inputs
-    const sanitizeShell = (str: string) => str.replace(/(["'$`\\])/g, '\\$1');
+    // Validate host against whitelist pattern (hostname or IP)
+    const validHostPattern = /^[a-zA-Z0-9][-a-zA-Z0-9.]*$/;
+    if (!validHostPattern.test(dbHost)) {
+      throw new Error('Invalid database host');
+    }
 
-    const query = `SELECT id, name, type FROM credentials_entity;`;
-    const command = `PGPASSWORD="${sanitizeShell(dbPassword)}" psql -h ${sanitizeShell(dbHost)} -p ${sanitizeShell(dbPort)} -U ${sanitizeShell(dbUser)} -d ${sanitizeShell(dbName)} -t -A -F"," -c "${query}"`;
+    // Validate port is numeric
+    if (!/^\d+$/.test(dbPort)) {
+      throw new Error('Invalid database port');
+    }
 
-    const { stdout } = await execAsync(command);
+    // Validate database name (alphanumeric, underscore, hyphen)
+    const validDbNamePattern = /^[a-zA-Z0-9_-]+$/;
+    if (!validDbNamePattern.test(dbName)) {
+      throw new Error('Invalid database name');
+    }
+
+    const query = 'SELECT id, name, type FROM credentials_entity;';
+    const env = { ...process.env, PGPASSWORD: dbPassword };
+
+    const { stdout } = await execFileAsync(
+      'psql',
+      ['-h', dbHost, '-p', dbPort, '-U', dbUser, '-d', dbName, '-t', '-A', '-F,', '-c', query],
+      { env }
+    );
 
     // Parse CSV output
     const lines = stdout.trim().split('\n').filter(line => line);
@@ -135,12 +153,17 @@ export class CredentialService {
     type: string,
     data: Record<string, any>
   ): Promise<{ valid: boolean; errors: string[] }> {
+    // Null/undefined check for data parameter
+    if (data === null || data === undefined) {
+      return { valid: false, errors: ['Credential data is required'] };
+    }
+
     const schema = await this.getSchema(type);
     const errors: string[] = [];
 
     // Check required fields
     for (const prop of schema.properties) {
-      if (prop.required && !data[prop.name]) {
+      if (prop.required && data[prop.name] === undefined) {
         errors.push(`Missing required field: ${prop.name}`);
       }
     }
@@ -199,6 +222,13 @@ export class CredentialService {
    * Update existing credential
    */
   async updateCredential(id: string, updates: Partial<N8nCredential>): Promise<N8nCredential> {
+    // Verify credential exists first
+    const credentials = await this.listCredentials();
+    const exists = credentials.some(c => c.id === id);
+    if (!exists) {
+      throw new Error(`Credential ${id} not found`);
+    }
+
     const updated = await n8nApi.updateCredential(id, updates);
     this.cache.clear();
     return updated;

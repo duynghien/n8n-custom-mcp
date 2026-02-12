@@ -8,6 +8,14 @@ vi.mock('child_process', () => ({
     // Simulate database not accessible
     callback(new Error('Database not accessible'), '', '');
   }),
+  execFile: vi.fn((cmd, args, options, callback) => {
+    // Simulate database not accessible
+    if (typeof options === 'function') {
+      options(new Error('Database not accessible'), '', '');
+    } else if (callback) {
+      callback(new Error('Database not accessible'), '', '');
+    }
+  }),
 }));
 
 vi.mock('util', () => ({
@@ -457,6 +465,26 @@ describe('CredentialService', () => {
 
   describe('updateCredential', () => {
     it('should update credential', async () => {
+      // Mock listWorkflows to return existing credential
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue({
+        data: [
+          {
+            id: 'wf1',
+            name: 'Test Workflow',
+            nodes: [
+              {
+                id: 'node1',
+                name: 'Test Node',
+                type: 'n8n-nodes-base.github',
+                credentials: {
+                  githubApi: { id: '123', name: 'GitHub Cred' },
+                },
+              },
+            ],
+          },
+        ],
+      });
+
       const mockUpdated = {
         id: '123',
         name: 'Updated Name',
@@ -472,6 +500,20 @@ describe('CredentialService', () => {
         name: 'Updated Name',
       });
       expect(result).toEqual(mockUpdated);
+    });
+
+    it('should throw error if credential not found', async () => {
+      // Clear cache to ensure fresh listCredentials call
+      credentialService.clearCache();
+
+      // Mock listWorkflows to return empty (no credentials)
+      vi.mocked(n8nApi.listWorkflows).mockResolvedValue({
+        data: [],
+      });
+
+      await expect(
+        credentialService.updateCredential('nonexistent', { name: 'New Name' })
+      ).rejects.toThrow('Credential nonexistent not found');
     });
   });
 });

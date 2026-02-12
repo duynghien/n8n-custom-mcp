@@ -14,6 +14,32 @@ import type {
  */
 export class N8nApiService {
   private nodeSchemaCache = new Map<string, N8nNodeSchema>();
+  private readonly MAX_CACHE_SIZE = 100;
+
+  private validateWorkflowId(id: string): void {
+    if (!id || id.trim() === '') {
+      throw new Error('Workflow ID is required and cannot be empty');
+    }
+  }
+
+  private validateWebhookPath(path: string): void {
+    if (path.includes('..')) {
+      throw new Error('Webhook path cannot contain ".."');
+    }
+    if (path.startsWith('/')) {
+      throw new Error('Webhook path cannot start with "/"');
+    }
+  }
+
+  private setCacheEntry(key: string, value: N8nNodeSchema): void {
+    if (this.nodeSchemaCache.size >= this.MAX_CACHE_SIZE) {
+      const firstKey = this.nodeSchemaCache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.nodeSchemaCache.delete(firstKey);
+      }
+    }
+    this.nodeSchemaCache.set(key, value);
+  }
 
   // ===== WORKFLOW OPERATIONS =====
 
@@ -31,6 +57,7 @@ export class N8nApiService {
   }
 
   async getWorkflow(id: string): Promise<N8nWorkflow> {
+    this.validateWorkflowId(id);
     try {
       const response = await n8nClient.get(`/workflows/${id}`);
       return response.data;
@@ -49,6 +76,7 @@ export class N8nApiService {
   }
 
   async updateWorkflow(id: string, workflow: Partial<N8nWorkflow>): Promise<N8nWorkflow> {
+    this.validateWorkflowId(id);
     try {
       const response = await n8nClient.put(`/workflows/${id}`, workflow);
       return response.data;
@@ -58,6 +86,7 @@ export class N8nApiService {
   }
 
   async deleteWorkflow(id: string): Promise<void> {
+    this.validateWorkflowId(id);
     try {
       await n8nClient.delete(`/workflows/${id}`);
     } catch (error) {
@@ -66,6 +95,7 @@ export class N8nApiService {
   }
 
   async activateWorkflow(id: string, active: boolean): Promise<N8nWorkflow> {
+    this.validateWorkflowId(id);
     try {
       const endpoint = active ? 'activate' : 'deactivate';
       const response = await n8nClient.post(`/workflows/${id}/${endpoint}`);
@@ -119,10 +149,12 @@ export class N8nApiService {
     queryParams?: Record<string, string>;
     testMode?: boolean;
   }): Promise<any> {
+    this.validateWebhookPath(params.path);
     try {
+      const encodedPath = encodeURIComponent(params.path);
       const endpoint = params.testMode
-        ? `/webhook-test/${params.path}`
-        : `/webhook/${params.path}`;
+        ? `/webhook-test/${encodedPath}`
+        : `/webhook/${encodedPath}`;
 
       const response = await webhookClient.request({
         method: params.method,
@@ -186,8 +218,8 @@ export class N8nApiService {
          schema = schema[0];
       }
 
-      // Store in cache
-      this.nodeSchemaCache.set(nodeName, schema);
+      // Store in cache with size limit
+      this.setCacheEntry(nodeName, schema);
       return schema;
     } catch (error) {
       throw handleApiError(error, `Failed to get schema for node ${nodeName}`);

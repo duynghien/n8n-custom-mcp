@@ -12,11 +12,16 @@ import { validationTools, handleValidationTool } from './tools/validation-tools.
 import { templateTools, handleTemplateTool } from './tools/template-tools.js';
 import { backupTools, handleBackupTool } from './tools/backup-tools.js';
 import { nodeTools, handleNodeTool } from './tools/node-tools.js';
+import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const packageJson = require('../package.json');
 
 const server = new Server(
   {
     name: 'n8n-custom-mcp',
-    version: '2.0.0',
+    version: packageJson.version,
   },
   {
     capabilities: {
@@ -60,7 +65,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     } else if (nodeTools.some(t => t.name === name)) {
       result = await handleNodeTool(name, args || {});
     } else {
-      throw new Error(`Unknown tool: ${name}`);
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
 
     return {

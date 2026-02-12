@@ -13,6 +13,19 @@ export function handleApiError(error: unknown, context: string): McpError {
     // Basic sanitization: remove potential tokens/keys from message
     message = message.replace(/([a-zA-Z0-9]{32,})/g, '[REDACTED]');
     message = message.replace(/(x-n8n-api-key|authorization|token|password|secret)=[^&\s]+/gi, '$1=[REDACTED]');
+    message = message.replace(/bearer\s+\S+/gi, 'bearer [REDACTED]');
+    message = message.replace(/basic\s+\S+/gi, 'basic [REDACTED]');
+
+    // Sanitize Authorization headers from error.config if present
+    if (error.config?.headers) {
+      const headers = error.config.headers;
+      if (headers.Authorization) {
+        headers.Authorization = '[REDACTED]';
+      }
+      if (headers.authorization) {
+        headers.authorization = '[REDACTED]';
+      }
+    }
 
     // Map HTTP status to MCP error codes
     if (status === 401 || status === 403) {
@@ -36,6 +49,13 @@ export function handleApiError(error: unknown, context: string): McpError {
       );
     }
 
+    if (status === 429) {
+      return new McpError(
+        ErrorCode.InvalidRequest,
+        `Rate limit exceeded: ${message}`
+      );
+    }
+
     return new McpError(
       ErrorCode.InternalError,
       `${context}: ${message}`
@@ -55,7 +75,7 @@ export function validateRequired(
   params: Record<string, any>,
   required: string[]
 ): void {
-  const missing = required.filter(key => !params[key]);
+  const missing = required.filter(key => params[key] === undefined || params[key] === null);
   if (missing.length > 0) {
     throw new McpError(
       ErrorCode.InvalidParams,

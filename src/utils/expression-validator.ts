@@ -19,7 +19,12 @@ export function extractExpressions(value: any): string[] {
   let match;
 
   while ((match = regex.exec(value)) !== null) {
-    expressions.push(match[1].trim());
+    const expr = match[1].trim();
+    // Check for nested braces (invalid expression)
+    if (expr.includes('{{') || expr.includes('}}')) {
+      continue;
+    }
+    expressions.push(expr);
   }
 
   return expressions;
@@ -44,7 +49,22 @@ export function validateExpression(expression: string): {
     return { valid: false, error: 'Empty expression' };
   }
 
-  // 2. Check for balanced parentheses
+  // 2. Check for prototype pollution attempts
+  if (
+    expression.includes('__proto__') ||
+    expression.includes('constructor') ||
+    expression.includes('prototype')
+  ) {
+    return { valid: false, error: 'Expression contains forbidden keywords' };
+  }
+
+  // 3. Check for invalid variable references that could lead to prototype pollution
+  const protoPattern = /\$__proto__|\$constructor/;
+  if (protoPattern.test(expression)) {
+    return { valid: false, error: 'Invalid variable reference' };
+  }
+
+  // 4. Check for balanced parentheses
   let parenCount = 0;
   for (const char of expression) {
     if (char === '(') parenCount++;
@@ -57,7 +77,7 @@ export function validateExpression(expression: string): {
     return { valid: false, error: 'Unbalanced parentheses' };
   }
 
-  // 3. Check for valid variable references
+  // 5. Check for valid variable references
   const varRegex = /\$(json|node|vars|parameter|now|today|workflow|execution|input|binary|env|prevNode|self)/;
   if (expression.includes('$') && !varRegex.test(expression)) {
     // Basic check for common mistakes like $jsn instead of $json
@@ -71,7 +91,7 @@ export function validateExpression(expression: string): {
     }
   }
 
-  // 4. Validate JS syntax using vm.Script (without executing)
+  // 6. Validate JS syntax using vm.Script (without executing)
   try {
     // Replace n8n specific variables with placeholders to allow JS syntax validation
     const sanitizedExpr = expression.replace(/\$(json|node|vars|parameter|now|today|workflow|execution|input|binary|env|prevNode|self)/g, '___V');

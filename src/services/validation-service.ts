@@ -84,6 +84,7 @@ export class ValidationService {
     const nodeIds = new Set<string>();
     const duplicateIds: string[] = [];
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       if (nodeIds.has(node.id)) {
         duplicateIds.push(node.id);
       }
@@ -100,6 +101,7 @@ export class ValidationService {
     // 3. Node name uniqueness (n8n requirement)
     const nodeNames = new Map<string, string[]>();
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       if (!nodeNames.has(node.name)) {
         nodeNames.set(node.name, []);
       }
@@ -123,6 +125,7 @@ export class ValidationService {
       const validTypes = new Set(nodeTypes.map((t: any) => t.name));
 
       for (const node of workflow.nodes) {
+        if (!node || !node.id) continue;
         if (!validTypes.has(node.type)) {
           errors.push({
             type: 'invalid_node_type',
@@ -153,8 +156,10 @@ export class ValidationService {
 
     // 6. Trigger node check (for active workflows)
     const hasTrigger = workflow.nodes.some((node: N8nNode) =>
-      node.type.toLowerCase().includes('trigger') ||
-      node.type.toLowerCase().includes('webhook')
+      node && node.type && (
+        node.type.toLowerCase().includes('trigger') ||
+        node.type.toLowerCase().includes('webhook')
+      )
     );
 
     if (!hasTrigger && workflow.active) {
@@ -185,6 +190,7 @@ export class ValidationService {
 
     // 8. Disabled nodes with connections (warning)
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       if (node.disabled && workflow.connections?.[node.id]) {
         warnings.push({
           type: 'disabled_node',
@@ -196,7 +202,7 @@ export class ValidationService {
     }
 
     // Check if all nodes are disabled
-    const allDisabled = workflow.nodes.every((node: N8nNode) => node.disabled);
+    const allDisabled = workflow.nodes.every((node: N8nNode) => !node || node.disabled);
     if (allDisabled && workflow.nodes.length > 0) {
       warnings.push({
         type: 'all_nodes_disabled',
@@ -251,6 +257,7 @@ export class ValidationService {
 
     // Check each node for credential references
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       const nodeCredentials = node.credentials;
       if (!nodeCredentials || Object.keys(nodeCredentials).length === 0) {
         continue;
@@ -385,6 +392,7 @@ export class ValidationService {
 
     // Check expressions in each node
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       extractAllExpressions(node.parameters, node.name, node.id);
     }
 
@@ -421,7 +429,7 @@ export class ValidationService {
     }
 
     const connections = workflow.connections || {};
-    const nodeIds = new Set(workflow.nodes.map(n => n.id));
+    const nodeIds = new Set(workflow.nodes.filter(n => n && n.id).map(n => n.id));
 
     // 1. Check for orphaned nodes (no connections)
     const connectedNodes = new Set<string>();
@@ -443,6 +451,7 @@ export class ValidationService {
     }
 
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       if (!connectedNodes.has(node.id)) {
         issues.push({
           type: 'orphaned_node',
@@ -455,7 +464,7 @@ export class ValidationService {
 
     // 2. Check for missing error handling
     const nodesWithErrorHandling = workflow.nodes.filter(
-      n => n.continueOnFail || n.onError === 'continueRegularOutput'
+      n => n && (n.continueOnFail || n.onError === 'continueRegularOutput')
     );
     if (nodesWithErrorHandling.length === 0 && workflow.nodes.length > 3) {
       issues.push({
@@ -468,6 +477,7 @@ export class ValidationService {
     // 3. Check for generic node names
     const genericNames = ['Start', 'Node', 'HTTP Request', 'Set', 'Code', 'IF', 'Switch'];
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       if (genericNames.includes(node.name)) {
         issues.push({
           type: 'generic_name',
@@ -487,6 +497,7 @@ export class ValidationService {
     ];
 
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       const paramsStr = JSON.stringify(node.parameters);
       for (const pattern of secretPatterns) {
         if (pattern.test(paramsStr)) {
@@ -503,10 +514,10 @@ export class ValidationService {
 
     // 5. Check for loops without limits
     const loopNodes = workflow.nodes.filter(n =>
-      n.type.toLowerCase().includes('loop') ||
-      n.type.toLowerCase().includes('split')
+      n && n.type && (n.type.toLowerCase().includes('loop') || n.type.toLowerCase().includes('split'))
     );
     for (const node of loopNodes) {
+      if (!node || !node.id) continue;
       const hasLimit = node.parameters?.batchSize || node.parameters?.options?.batchSize;
       if (!hasLimit) {
         issues.push({
@@ -557,7 +568,7 @@ export class ValidationService {
     }
 
     const connections = workflow.connections || {};
-    const nodeTypes = workflow.nodes.map(n => n.type);
+    const nodeTypes = workflow.nodes.filter(n => n && n.type).map(n => n.type);
 
     // 1. Suggest using Set node for data transformation
     const hasHttpNode = nodeTypes.some(t => t.toLowerCase().includes('http'));
@@ -572,7 +583,7 @@ export class ValidationService {
     }
 
     // 2. Suggest error workflow for critical operations
-    const hasErrorWorkflow = workflow.nodes.some(n => n.onError === 'continueErrorOutput');
+    const hasErrorWorkflow = workflow.nodes.some(n => n && n.onError === 'continueErrorOutput');
     const hasCriticalNodes = nodeTypes.some(t => {
       const lowerType = t.toLowerCase();
       return (
@@ -596,9 +607,10 @@ export class ValidationService {
 
     // 3. Suggest batch processing for loops
     const loopNodes = workflow.nodes.filter(n =>
-      n.type.toLowerCase().includes('loop') || n.type.toLowerCase().includes('split')
+      n && n.type && (n.type.toLowerCase().includes('loop') || n.type.toLowerCase().includes('split'))
     );
     for (const node of loopNodes) {
+      if (!node || !node.id) continue;
       const itemsPerIteration = node.parameters?.batchSize || 1;
       if (itemsPerIteration === 1) {
         suggestions.push({
@@ -613,6 +625,7 @@ export class ValidationService {
 
     // 4. Suggest using credentials instead of hardcoded values
     for (const node of workflow.nodes) {
+      if (!node || !node.id) continue;
       const paramsStr = JSON.stringify(node.parameters);
       if (
         paramsStr.includes('Authorization') &&
