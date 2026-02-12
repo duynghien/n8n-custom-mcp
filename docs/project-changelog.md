@@ -2,6 +2,23 @@
 
 Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận tại đây.
 
+## [2.2.0] - 2026-02-12
+
+### Added
+- **Native SSE & Hybrid Support**: Loại bỏ phụ thuộc vào `supergateway`, triển khai SSE server trực tiếp bằng Express.
+  - Hỗ trợ đa phiên bản (Multi-session) ổn định, không còn lỗi crash khi nhiều client kết nối đồng thời.
+  - **Hybrid "Streamable HTTP" Handler**: Hỗ trợ đặc biệt cho LobeHub plugin, tự động phản hồi `tools/list` mà không cần bước `initialize` phức tạp.
+- **Auto-CORS**: Tích hợp sẵn middleware CORS, cho phép kết nối từ mọi origin mặc định.
+- **Schema Compatibility**: Sửa lỗi tool `get_node_schema` không tương thích với một số client do sử dụng Zod schema phức tạp (chuyển sang plain JSON Schema).
+
+### Changed
+- **Docker Optimization**: Đơn giản hóa `Dockerfile` và `docker-compose.yml`, chạy ứng dụng trực tiếp bằng `node dist/index.js`.
+- **Environment Variables**: Thêm biến `MCP_TRANSPORT=sse` để chuyển đổi chế độ chạy.
+
+### Fixed
+- Lỗi `supergateway` treo/crash khi LobeHub thực hiện healthcheck và test connection liên tục.
+- Lỗi skill hiển thị `undefined` trên LobeHub do sai định dạng tool schema.
+
 ## [2.1.0] - 2026-02-12
 
 ### Added

@@ -1,10 +1,8 @@
-<div align="center">
-
-# 🔌 n8n-custom-mcp v2.1.0
+# 🔌 n8n-custom-mcp v2.2.0
 
 **Full-power MCP Server cho n8n — Dành cho AI Agent thực sự muốn _làm chủ_ workflow.**
 
-[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](package.json)
 [![Tests](https://img.shields.io/badge/tests-201%20passed-success.svg)](src/__tests__/)
 [![Coverage](https://img.shields.io/badge/coverage-82%25-green.svg)](plans/reports/tester-260211-2000-system-validation.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -18,8 +16,6 @@
 ---
 
 <img src="https://raw.githubusercontent.com/duynghien/n8n-custom-mcp/main/docs/architecture.png" alt="Architecture" width="700" />
-
-</div>
 
 ## ❓ Tại sao cần repo này?
 
@@ -86,7 +82,7 @@ Theo dõi và khắc phục lỗi thời gian thực:
 - Multi-stage build (Node 20 Alpine).
 - Tích hợp `postgresql-client` cho DB fallback.
 - Healthcheck tự động giám sát trạng thái server.
-- [supergateway](https://github.com/nichochar/supergateway) expose MCP qua HTTP.
+- **Native SSE & Hybrid Support**: Tự động hỗ trợ các client LobeHub, Claude Desktop và Browser.
 
 ## 📦 Cài đặt nhanh
 
@@ -138,15 +134,8 @@ n8n-mcp:
   environment:
     - N8N_HOST=http://n8n:5678
     - N8N_API_KEY=${N8N_API_KEY}
-  depends_on:
-    n8n:
-      condition: service_started
-  command: >
-    --stdio "node dist/index.js"
-    --port 3000
-    --outputTransport streamableHttp
-    --streamableHttpPath /mcp
-    --cors
+    - MCP_TRANSPORT=sse
+    - PORT=3000
 ```
 
 ### Bước 4: Kết nối LobeHub/OpenClaw
@@ -181,18 +170,9 @@ volumes:
   - ./backups:/app/backups
 ```
 
-### Supergateway Options
+### Native Transport (NEW)
 
-MCP server chạy qua stdio, được wrap bởi [supergateway](https://github.com/nichochar/supergateway) để expose qua HTTP:
-
-```bash
-supergateway \
-  --stdio "node dist/index.js" \
-  --port 3000 \
-  --outputTransport streamableHttp \
-  --streamableHttpPath /mcp \
-  --cors
-```
+Từ v2.2.0, server chạy native SSE trực tiếp. Không cần cài đặt thêm `supergateway`.
 
 ## 💡 Sử dụng
 
@@ -311,11 +291,11 @@ LobeHub / OpenClaw
 └──────────────────────┘
 ```
 
-## 🌐 SSE Transport Support (NEW in v2.1)
+## 🌐 SSE & Hybrid Transport (NEW in v2.2)
 
-Server hỗ trợ **Server-Sent Events (SSE)** transport thông qua supergateway, cho phép browser và HTTP clients kết nối trực tiếp:
+Server hỗ trợ **Native Server-Sent Events (SSE)**, tích hợp sẵn trong mã nguồn.
 
-### Tính năng SSE
+### Tính năng
 
 - ✅ **Real-time streaming**: Nhận responses qua SSE events
 - ✅ **Browser compatible**: Sử dụng EventSource API hoặc fetch()

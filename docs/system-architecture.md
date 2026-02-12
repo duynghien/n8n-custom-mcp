@@ -1,13 +1,13 @@
 # System Architecture
 
-**Version**: 2.0.0
+**Version**: 2.2.0
 **Last Updated**: 2026-02-12
 
 ---
 
 ## Overview
 
-n8n-custom-mcp là một MCP (Model Context Protocol) server cung cấp 31 tools để quản lý n8n workflows, credentials, và executions. Server hỗ trợ cả stdio và SSE (Server-Sent Events) transport layers thông qua supergateway.
+n8n-custom-mcp là một MCP (Model Context Protocol) server cung cấp 31 tools để quản lý n8n workflows, credentials, và executions. Server hỗ trợ cả stdio và **Native SSE (Server-Sent Events)** + **Hybrid Streamable HTTP** transport layers trực tiếp trong mã nguồn.
 
 ---
 
@@ -20,17 +20,18 @@ graph TB
         A2[Browser Client<br/>EventSource/fetch]
         A3[Node.js Client<br/>eventsource lib]
         A4[Custom MCP Client<br/>HTTP/SSE]
+        A5[LobeHub<br/>Streamable HTTP]
     end
 
-    subgraph "Transport Layer"
-        B1[supergateway<br/>Port 3000]
-        B2[stdio ↔ HTTP/SSE<br/>Converter]
+    subgraph "Transport Layer (Native)"
+        B1[Express Server<br/>Port 3000]
+        B2[Native SSE Handler<br/>/mcp & /message]
+        B3[Hybrid Handler<br/>POST /mcp]
     end
 
     subgraph "MCP Server Layer"
-        C1[MCP Server<br/>src/index.ts]
+        C1[MCP Server Instance<br/>src/index.ts]
         C2[Tool Router<br/>31 tools]
-        C3[StdioServerTransport<br/>@modelcontextprotocol/sdk]
     end
 
     subgraph "Business Logic Layer"
@@ -56,15 +57,17 @@ graph TB
         F4[File System<br/>Backups]
     end
 
-    A1 -->|stdio| C3
-    A2 -->|HTTP POST + SSE| B1
-    A3 -->|HTTP POST + SSE| B1
-    A4 -->|HTTP POST + SSE| B1
+    A1 -->|stdio| C1
+    A2 -->|GET /mcp + POST /message| B1
+    A3 -->|GET /mcp + POST /message| B1
+    A4 -->|GET /mcp + POST /message| B1
+    A5 -->|POST /mcp| B1
 
     B1 --> B2
-    B2 -->|stdio| C3
+    B1 --> B3
+    B2 -->|Internal| C1
+    B3 -->|Internal| C1
 
-    C3 --> C1
     C1 --> C2
 
     C2 --> D1
@@ -86,9 +89,9 @@ graph TB
 
     style B1 fill:#e1f5ff
     style B2 fill:#e1f5ff
+    style B3 fill:#e1f5ff
     style C1 fill:#fff4e1
     style C2 fill:#fff4e1
-    style C3 fill:#fff4e1
 ```
 
 ---
@@ -100,26 +103,19 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant Client as Browser/Node Client
-    participant SG as supergateway
-    participant MCP as MCP Server
+    participant Exp as Express Server
+    participant MCP as MCP Server Instance
     participant n8n as n8n API
 
-    Client->>SG: POST /mcp<br/>Accept: application/json, text/event-stream<br/>Body: {"jsonrpc":"2.0","method":"tools/list","id":1}
+    Client->>Exp: GET /mcp<br/>Accept: text/event-stream
+    Exp-->>Client: event: endpoint<br/>data: /message?sessionId=XYZ
 
-    SG->>SG: Parse HTTP request
-    SG->>MCP: Forward via stdio<br/>{"jsonrpc":"2.0","method":"tools/list","id":1}
-
-    MCP->>MCP: Route to tool handler
-    MCP->>n8n: GET /workflows (if needed)
-    n8n-->>MCP: Workflow data
-
-    MCP-->>SG: stdio response<br/>{"jsonrpc":"2.0","result":{...},"id":1}
-
-    SG->>SG: Convert to SSE format
-    SG-->>Client: event: message<br/>data: {"jsonrpc":"2.0","result":{...},"id":1}
-
-    Client->>Client: Parse SSE event
-    Client->>Client: Extract JSON-RPC response
+    Client->>Exp: POST /message?sessionId=XYZ<br/>Body: {"method":"initialize",...}
+    Exp->>MCP: Internal process
+    MCP->>n8n: API Call (if needed)
+    n8n-->>MCP: Data
+    MCP-->>Exp: Result
+    Exp-->>Client: event: message<br/>data: {"result":...}
 ```
 
 ### SSE Event Format
@@ -150,22 +146,13 @@ data: {"jsonrpc":"2.0","error":{"code":-32000,"message":"..."},"id":1}
 
 ### 1. Transport Layer
 
-#### supergateway
-- **Role**: Chuyển đổi giữa stdio và HTTP/SSE
-- **Configuration**:
-  ```bash
-  supergateway \
-    --stdio "node dist/index.js" \
-    --port 3000 \
-    --outputTransport streamableHttp \
-    --streamableHttpPath /mcp \
-    --cors
-  ```
+#### Native Native SSE (v2.2.0+)
+- **Role**: Tích hợp trực tiếp chuẩn MCP SSE (Server-Sent Events)
 - **Features**:
-  - Automatic stdio ↔ SSE conversion
-  - CORS support cho browser clients
-  - Keep-alive connections
-  - Chunked transfer encoding
+  - Hỗ trợ đa session (new Server per session)
+  - Hoạt động mượt mà với LobeHub qua POST /mcp
+  - Không cần bridge trung gian
+  - CORS sẵn có
 
 #### StdioServerTransport
 - **Role**: MCP SDK transport implementation
@@ -480,12 +467,12 @@ services:
       - DB_DATABASE=${DB_DATABASE}
       - DB_USERNAME=${DB_USERNAME}
       - DB_PASSWORD=${DB_PASSWORD}
-    command: >
-      --stdio "node dist/index.js"
-      --port 3000
-      --outputTransport streamableHttp
-      --streamableHttpPath /mcp
-      --cors
+    command: node dist/index.js
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_API_KEY=${N8N_API_KEY}
+      - MCP_TRANSPORT=sse
+      - PORT=3000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
@@ -725,8 +712,8 @@ spec:
 
 ## References
 
-- [MCP Protocol Specification](https://modelcontextprotocol.io/)
+- [MCP SDK for JavaScript](https://github.com/modelcontextprotocol/sdk-js)
 - [n8n API Documentation](https://docs.n8n.io/api/)
-- [supergateway GitHub](https://github.com/nichochar/supergateway)
+- [Express.js SSE guide](https://expressjs.com/en/advanced/best-practice-performance.html)
 - [Server-Sent Events Specification](https://html.spec.whatwg.org/multipage/server-sent-events.html)
 - [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)

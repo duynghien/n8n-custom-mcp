@@ -1,6 +1,6 @@
 # SSE Troubleshooting Guide
 
-**Version**: 2.1.0
+**Version**: 2.2.0
 **Last Updated**: 2026-02-12
 
 ---
@@ -110,13 +110,9 @@ has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is pres
 **Solutions**:
 
 **A. Verify CORS is enabled**:
-```bash
-# Check docker-compose.yml
-grep -A 5 "command:" docker-compose.yml
-# Should include: --cors
-```
+Server mặc định cho phép CORS cho tất cả các origin (*). Kiểm tra trong `src/index.ts` để cấu hình chi tiết hơn nếu cần.
 
-**B. Restart server với CORS**:
+**B. Restart server**:
 ```bash
 docker compose down
 docker compose up -d --build
@@ -607,7 +603,7 @@ curl -H "X-N8N-API-KEY: your-key" \
      http://localhost:5678/api/v1/workflows
 ```
 
-**Test supergateway health**:
+**Test server health**:
 ```bash
 curl http://localhost:3000/health
 ```

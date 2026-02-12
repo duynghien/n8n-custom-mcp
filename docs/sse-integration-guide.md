@@ -1,13 +1,13 @@
 # SSE Integration Guide
 
-**Version**: 2.1.0
+**Version**: 2.2.0
 **Last Updated**: 2026-02-12
 
 ---
 
 ## Overview
 
-n8n-custom-mcp hỗ trợ **Server-Sent Events (SSE)** transport thông qua supergateway, cho phép browser và HTTP clients kết nối trực tiếp mà không cần stdio transport. Guide này hướng dẫn cách tích hợp SSE clients với MCP server.
+n8n-custom-mcp hỗ trợ **Native Server-Sent Events (SSE)** tích hợp sẵn, cho phép browser và HTTP clients kết nối trực tiếp mà không cần công cụ trung gian. Guide này hướng dẫn cách tích hợp SSE clients với MCP server.
 
 ---
 
