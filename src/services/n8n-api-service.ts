@@ -4,7 +4,8 @@ import type {
   N8nWorkflow,
   N8nExecution,
   N8nCredential,
-  N8nCredentialSchema
+  N8nCredentialSchema,
+  N8nNodeSchema
 } from '../types/n8n-types.js';
 
 /**
@@ -12,6 +13,8 @@ import type {
  * Handles all HTTP communication with n8n instance
  */
 export class N8nApiService {
+  private nodeSchemaCache = new Map<string, N8nNodeSchema>();
+
   // ===== WORKFLOW OPERATIONS =====
 
   async listWorkflows(params?: {
@@ -148,6 +151,46 @@ export class N8nApiService {
       return response.data.data || response.data;
     } catch (error) {
       throw handleApiError(error, 'Failed to list node types');
+    }
+  }
+
+  async getNodeSchema(nodeName: string): Promise<N8nNodeSchema> {
+    // Check cache first
+    if (this.nodeSchemaCache.has(nodeName)) {
+      return this.nodeSchemaCache.get(nodeName)!;
+    }
+
+    try {
+      const response = await n8nClient.get(`/node-types/${nodeName}`);
+      let schema = response.data;
+
+      // Handle potentially wrapped response (n8n API structure varies)
+      if (schema.data) {
+        schema = schema.data;
+      }
+
+      // If multiple versions are returned (legacy/new structure handling)
+      // We want to ensure we get the latest version if it's an array or a map
+      // But typically /node-types/:name returns the specific node definition.
+      // If the node has versions, n8n might return the default one or a list.
+      // Assuming for now it returns a single INodeTypeDescription compatible object.
+      // If it returns an array of versions, we'll need to pick the highest one.
+
+      if (Array.isArray(schema)) {
+         // Sort by version number (descending) and pick the first one
+         schema.sort((a: any, b: any) => {
+             const vA = typeof a.version === 'number' ? a.version : (Array.isArray(a.version) ? Math.max(...a.version) : 0);
+             const vB = typeof b.version === 'number' ? b.version : (Array.isArray(b.version) ? Math.max(...b.version) : 0);
+             return vB - vA;
+         });
+         schema = schema[0];
+      }
+
+      // Store in cache
+      this.nodeSchemaCache.set(nodeName, schema);
+      return schema;
+    } catch (error) {
+      throw handleApiError(error, `Failed to get schema for node ${nodeName}`);
     }
   }
 

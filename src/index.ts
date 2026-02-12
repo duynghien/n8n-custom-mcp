@@ -11,6 +11,7 @@ import { credentialTools, handleCredentialTool } from './tools/credential-tools.
 import { validationTools, handleValidationTool } from './tools/validation-tools.js';
 import { templateTools, handleTemplateTool } from './tools/template-tools.js';
 import { backupTools, handleBackupTool } from './tools/backup-tools.js';
+import { nodeTools, handleNodeTool } from './tools/node-tools.js';
 
 const server = new Server(
   {
@@ -33,6 +34,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       ...validationTools,
       ...templateTools,
       ...backupTools,
+      ...nodeTools,
     ],
   };
 });
@@ -55,6 +57,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       result = await handleTemplateTool(name, args || {});
     } else if (backupTools.some(t => t.name === name)) {
       result = await handleBackupTool(name, args || {});
+    } else if (nodeTools.some(t => t.name === name)) {
+      result = await handleNodeTool(name, args || {});
     } else {
       throw new Error(`Unknown tool: ${name}`);
     }

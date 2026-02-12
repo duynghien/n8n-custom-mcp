@@ -64,6 +64,59 @@ export interface N8nCredentialSchema {
   }>;
 }
 
+export interface INodeProperties {
+  displayName: string;
+  name: string;
+  type: string;
+  default?: any;
+  description?: string;
+  placeholder?: string;
+  options?: Array<{
+    name: string;
+    value: string | number | boolean;
+    description?: string;
+  }>;
+  required?: boolean;
+  typeOptions?: {
+    [key: string]: any;
+  };
+  displayOptions?: {
+    show?: {
+      [key: string]: any[];
+    };
+    hide?: {
+      [key: string]: any[];
+    };
+  };
+}
+
+export interface INodeTypeDescription {
+  displayName: string;
+  name: string;
+  icon: string;
+  group: string[];
+  version: number | number[];
+  description: string;
+  defaults: {
+    name: string;
+    color?: string;
+  };
+  inputs: string[];
+  outputs: string[];
+  credentials?: Array<{
+    name: string;
+    required?: boolean;
+    tester?: {
+      request: any;
+    };
+  }>;
+  properties: INodeProperties[];
+}
+
+export interface N8nNodeSchema extends INodeTypeDescription {
+  // Alias for backward compatibility or clearer naming if needed
+}
+
 // Connection types
 export interface N8nConnection {
   node: string;

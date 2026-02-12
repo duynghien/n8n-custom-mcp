@@ -2,6 +2,14 @@
 
 Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận tại đây.
 
+## [2.1.0-dev] - 2026-02-12
+
+### Added
+- **Dynamic Node Schema Discovery**: Triển khai thành công công cụ `get_node_schema` cho phép AI truy vấn cấu trúc tham số của node.
+- **Tối ưu hóa**: Cơ chế caching in-memory cho schema node để tăng tốc độ phản hồi.
+- **Tiết kiệm token**: Cơ chế làm sạch schema (loại bỏ `displayOptions` và các trường UI không cần thiết) giúp giảm kích thước JSON đầu ra.
+- **Dynamic Node Schema Discovery**: Khởi tạo kế hoạch và cấu trúc cho công cụ khám phá schema node động.
+
 ## [2.0.0] - 2026-02-11
 
 ### Added
