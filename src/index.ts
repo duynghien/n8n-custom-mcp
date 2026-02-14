@@ -75,22 +75,7 @@ function createMcpServer() {
     console.error(`Calling tool: ${name}`);
 
     try {
-      let result: any;
-      if (workflowTools.some(t => t.name === name)) {
-        result = await handleWorkflowTool(name, args || {});
-      } else if (credentialTools.some(t => t.name === name)) {
-        result = await handleCredentialTool(name, args || {});
-      } else if (validationTools.some(t => t.name === name)) {
-        result = await handleValidationTool(name, args || {});
-      } else if (templateTools.some(t => t.name === name)) {
-        result = await handleTemplateTool(name, args || {});
-      } else if (backupTools.some(t => t.name === name)) {
-        result = await handleBackupTool(name, args || {});
-      } else if (nodeTools.some(t => t.name === name)) {
-        result = await handleNodeTool(name, args || {});
-      } else {
-        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-      }
+      const result = await executeTool(name, args || {});
 
       // Apply response size limiting
       const limited = limitResponse(result, RESPONSE_LIMITS.MAX_RESPONSE_SIZE);
@@ -105,13 +90,13 @@ function createMcpServer() {
       // Build response with pagination info if truncated
       const responseData = limited.truncated
         ? {
-            ...limited.data,
-            _meta: {
-              truncated: true,
-              originalSize: limited.originalSize,
-              pagination: limited.pagination,
-            },
-          }
+          ...limited.data,
+          _meta: {
+            truncated: true,
+            originalSize: limited.originalSize,
+            pagination: limited.pagination,
+          },
+        }
         : limited.data;
 
       return {
@@ -278,10 +263,63 @@ async function main() {
         };
         res.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`);
         res.end();
+      } else if (method === 'notifications/initialized') {
+        // Just acknowledge the notification
+        console.error('Hybrid handler: Client initialized');
+        res.end();
+      } else if (method === 'tools/call') {
+        const { name, arguments: args } = req.body.params;
+
+        try {
+          const result = await executeTool(name, args || {});
+
+          // Apply response size limiting
+          const limited = limitResponse(result, RESPONSE_LIMITS.MAX_RESPONSE_SIZE);
+
+          if (limited.truncated) {
+            console.warn(
+              `Response truncated for tool ${name}: ` +
+              `${Math.round(limited.originalSize / 1024)}KB → ${Math.round(limited.truncatedSize / 1024)}KB`
+            );
+          }
+
+          const responseData = limited.truncated
+            ? {
+              ...limited.data,
+              _meta: {
+                truncated: true,
+                originalSize: limited.originalSize,
+                pagination: limited.pagination,
+              },
+            }
+            : limited.data;
+
+          const response = {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: safeStringify(responseData) }]
+            }
+          };
+          res.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`);
+        } catch (error) {
+          console.error(`Tool error (${name}):`, error);
+          const errorResponse = {
+            jsonrpc: '2.0',
+            id,
+            error: {
+              code: -32603,
+              message: error instanceof Error ? error.message : 'Internal error',
+            }
+          };
+          res.write(`event: message\ndata: ${JSON.stringify(errorResponse)}\n\n`);
+        }
+        res.end();
       } else {
         // For actual tool calls or other methods, use the server logic
         // This is a simplified fallback
-        res.status(501).send('Method not implemented in hybrid mode');
+        console.error(`Method not implemented in hybrid mode: ${method}`);
+        res.status(501).send(`Method not implemented in hybrid mode: ${method}`);
       }
     });
 
@@ -318,3 +356,24 @@ async function main() {
 }
 
 main().catch(console.error);
+
+/**
+ * Executes a tool by name with the given arguments.
+ */
+async function executeTool(name: string, args: any): Promise<any> {
+  if (workflowTools.some(t => t.name === name)) {
+    return await handleWorkflowTool(name, args || {});
+  } else if (credentialTools.some(t => t.name === name)) {
+    return await handleCredentialTool(name, args || {});
+  } else if (validationTools.some(t => t.name === name)) {
+    return await handleValidationTool(name, args || {});
+  } else if (templateTools.some(t => t.name === name)) {
+    return await handleTemplateTool(name, args || {});
+  } else if (backupTools.some(t => t.name === name)) {
+    return await handleBackupTool(name, args || {});
+  } else if (nodeTools.some(t => t.name === name)) {
+    return await handleNodeTool(name, args || {});
+  } else {
+    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+  }
+}
