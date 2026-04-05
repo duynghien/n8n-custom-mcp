@@ -268,9 +268,27 @@ async function main() {
         console.error('Hybrid handler: Client initialized');
         res.end();
       } else if (method === 'tools/call') {
-        const { name, arguments: args } = req.body.params;
-
         try {
+          const params = req.body.params;
+          if (
+            !params ||
+            typeof params !== 'object' ||
+            typeof (params as { name?: unknown }).name !== 'string'
+          ) {
+            const errorResponse = {
+              jsonrpc: '2.0',
+              id,
+              error: {
+                code: -32602,
+                message: 'Invalid params: tools/call requires params.name',
+              },
+            };
+            res.write(`event: message\ndata: ${JSON.stringify(errorResponse)}\n\n`);
+            res.end();
+            return;
+          }
+
+          const { name, arguments: args } = params as { name: string; arguments?: unknown };
           const result = await executeTool(name, args || {});
 
           // Apply response size limiting

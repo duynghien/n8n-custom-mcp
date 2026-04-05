@@ -354,7 +354,10 @@ export class BackupService {
 
   private parseBackupId(backupId: string): { workflowId: string; timestamp: string; nonce: string } {
     // Format: backup_{workflowId}_{timestamp}_{nonce}
-    const match = backupId.match(/^backup_(.+?)_(\d{4}-\d{2}-\d{2}T.+?)_([a-f0-9]{8})$/);
+    // Timestamp supports current format (HH-MM-SS-ms) and legacy fixture format (HH-MM-SSS-ms).
+    const match = backupId.match(
+      /^backup_([a-zA-Z0-9_-]+)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-(?:\d{2}-\d{3}|\d{3}-\d{3})Z)_([a-f0-9]{8})$/
+    );
     if (!match) {
       throw new Error(`Invalid backup ID format: ${backupId}`);
     }
@@ -371,15 +374,32 @@ export class BackupService {
   }
 
   private async findBackupPath(workflowId: string, backupId: string): Promise<string> {
-    const workflowDir = path.join(this.backupRoot, workflowId);
-    const { timestamp, nonce } = this.parseBackupId(backupId);
-    const backupPath = path.join(workflowDir, `${timestamp}_${nonce}.json`);
+    const sanitizedWorkflowId = this.sanitizeWorkflowId(workflowId);
+    const parsed = this.parseBackupId(backupId);
+
+    if (parsed.workflowId !== sanitizedWorkflowId) {
+      throw new Error(
+        `Backup ${backupId} does not belong to workflow ${sanitizedWorkflowId}`
+      );
+    }
+
+    const workflowDir = path.join(this.backupRoot, sanitizedWorkflowId);
+    const dirPathCheck = await validateSafePath(workflowDir, this.backupRoot);
+    if (!dirPathCheck.safe) {
+      throw new Error(`Unsafe backup directory path: ${dirPathCheck.reason}`);
+    }
+
+    const backupPath = path.join(workflowDir, `${parsed.timestamp}_${parsed.nonce}.json`);
+    const filePathCheck = await validateSafePath(backupPath, this.backupRoot);
+    if (!filePathCheck.safe) {
+      throw new Error(`Unsafe backup file path: ${filePathCheck.reason}`);
+    }
 
     try {
       await fs.access(backupPath);
       return backupPath;
     } catch {
-      throw new Error(`Backup ${backupId} not found for workflow ${workflowId}`);
+      throw new Error(`Backup ${backupId} not found for workflow ${sanitizedWorkflowId}`);
     }
   }
 

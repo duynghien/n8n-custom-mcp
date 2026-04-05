@@ -1,6 +1,11 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
+function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
+  const relative = path.relative(rootPath, targetPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 /**
  * Validate path is not a symlink and is within allowed directory
  */
@@ -13,14 +18,14 @@ export async function validateSafePath(
     const resolvedPath = path.resolve(targetPath);
     const resolvedRoot = path.resolve(allowedRoot);
 
-    // Check path is within allowed root (prevent traversal)
-    if (!resolvedPath.startsWith(resolvedRoot)) {
+    // Check path is within allowed root (prevent traversal and prefix bypass)
+    if (!isPathWithinRoot(resolvedPath, resolvedRoot)) {
       return { safe: false, reason: 'Path outside allowed directory' };
     }
 
     // Check if path exists
     try {
-      const stats = await fs.lstat(targetPath);
+      const stats = await fs.lstat(resolvedPath);
 
       // Reject symlinks
       if (stats.isSymbolicLink()) {
