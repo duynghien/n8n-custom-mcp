@@ -1,9 +1,9 @@
-# 🔌 n8n-custom-mcp v2.2.0
+# 🔌 n8n-custom-mcp v2.2.1
 
 **Full-power MCP Server cho n8n — Dành cho AI Agent thực sự muốn _làm chủ_ workflow.**
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-201%20passed-success.svg)](src/__tests__/)
+[![Version](https://img.shields.io/badge/version-2.2.1-blue.svg)](package.json)
+[![Tests](https://img.shields.io/badge/tests-229%20passed-success.svg)](src/__tests__/)
 [![Coverage](https://img.shields.io/badge/coverage-82%25-green.svg)](plans/reports/tester-260211-2000-system-validation.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-≥18-green.svg)](https://nodejs.org/)
@@ -148,6 +148,77 @@ Trong phần cấu hình MCP Plugin:
 | URL | `http://<IP-máy-chủ>:3000/mcp` |
 
 Sau khi kết nối, bạn sẽ thấy **31 tools** xuất hiện. ✅
+
+### Bước 5: Setup MCP cho Coding Agents (Claude Code, Codex, Antigravity, Cursor)
+
+Server này hỗ trợ tốt nhất qua **Streamable HTTP**:
+
+- URL: `http://localhost:3000/mcp`
+- Method: `POST`
+- Header gợi ý: `Accept: application/json, text/event-stream`
+
+Nếu agent của bạn hỗ trợ MCP dạng JSON `mcpServers`, dùng mẫu chung sau:
+
+```json
+{
+  "mcpServers": {
+    "n8n-custom-mcp": {
+      "type": "streamable-http",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+#### Claude Code
+
+1. Mở phần cấu hình MCP của Claude Code.
+2. Thêm server `n8n-custom-mcp` theo mẫu trên.
+3. Reload session, chạy `tools/list` để verify đã thấy đầy đủ tools.
+
+#### Codex
+
+1. Mở MCP config của Codex.
+2. Khai báo `n8n-custom-mcp` với `type=streamable-http`, `url=http://localhost:3000/mcp`.
+3. Reload agent rồi test bằng call `list_workflows`.
+
+#### Antigravity
+
+1. Vào phần MCP/Tools integration.
+2. Thêm MCP endpoint `http://localhost:3000/mcp` theo mẫu `mcpServers`.
+3. Kết nối lại agent và kiểm tra tool `tools/list`.
+
+#### Cursor
+
+1. Mở MCP config trong Cursor.
+2. Thêm `n8n-custom-mcp` với `type: "streamable-http"` và URL như trên.
+3. Reload Cursor rồi thử gọi `get_workflow` hoặc `list_workflows`.
+
+#### Fallback: stdio (khi agent không hỗ trợ streamable-http)
+
+Build trước:
+
+```bash
+npm run build
+```
+
+Mẫu cấu hình stdio:
+
+```json
+{
+  "mcpServers": {
+    "n8n-custom-mcp-stdio": {
+      "command": "node",
+      "args": ["/absolute/path/to/n8n-custom-mcp/dist/index.js"],
+      "env": {
+        "N8N_HOST": "http://localhost:5678",
+        "N8N_API_KEY": "your_api_key_here",
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}
+```
 
 ## ⚙️ Cấu hình
 
